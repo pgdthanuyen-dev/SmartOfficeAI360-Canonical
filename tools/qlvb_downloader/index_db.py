@@ -92,6 +92,12 @@ def init_db(db_path: str | Path) -> sqlite3.Connection:
         conn.execute(idx_sql)
         
     _upgrade_db_schema(conn)
+    try:
+        from .domain_repository import init_domain_schema
+
+        init_domain_schema(conn)
+    except Exception as exc:
+        logger.warning("[index_db] G02 domain schema migration failed: %s", exc)
     conn.commit()
 
     logger.debug("[index_db] DB khởi tạo tại %s", db_path)
