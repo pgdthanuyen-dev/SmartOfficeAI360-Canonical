@@ -91,7 +91,7 @@ Exclusions are evaluated before positive scoring:
 - `EXCLUDED_ISSUER` -> `issuer_name`, `issuer_group`
 - `EXCLUDED_DOCUMENT_TYPE` -> `document_type`
 
-Hard exclusions return `EXCLUDED` with score `0` and cannot become a primary recommendation. Soft exclusions subtract their configured penalty from the score.
+Hard exclusions return `EXCLUDED` with score `0` and cannot become a primary recommendation. Excluded candidates remain in the candidate list and append-only match history only for audit and diagnostics. Soft exclusions subtract their configured penalty from the score.
 
 ## Scoring
 
@@ -138,6 +138,8 @@ Candidates are sorted by:
 
 The top eligible candidate is compared with nearby eligible candidates. If another eligible rule is within `TOP_RULE_CONFLICT_DELTA` points and has a different lead unit or required role group, the recommendation becomes `NEEDS_CLASSIFICATION`.
 
+Only `MATCHED` and `MATCHED_WITH_WARNING` candidates participate in top-rule conflict detection. `EXCLUDED` and `NO_MATCH` candidates never create a conflict.
+
 Conflict recommendations emit:
 
 - `MULTIPLE_TOP_RULES`
@@ -156,6 +158,8 @@ The final `lead_unit_key` is cleared and `conflicting_rules` are returned for re
 Each `AssignmentRuleCandidate` includes rule id/code/version, score, decision, matched conditions, missing required conditions, matched exclusions, soft penalty total, lead/coordinating unit keys, required role codes, warnings, explanation, priority, and required-condition counts.
 
 `AssignmentRecommendation` includes document id/revision, input fingerprint, evaluated/eligible/excluded counts, primary rule, alternatives, conflicts, decision, confidence, lead unit key, coordinating unit keys, required roles, unresolved fields, warnings, explanation, engine version, and evaluation timestamp.
+
+`primary_rule` can only be `MATCHED`, `MATCHED_WITH_WARNING`, or `NEEDS_CLASSIFICATION`. `EXCLUDED` and `NO_MATCH` candidates never become `primary_rule` and never provide final `lead_unit_key`, `coordinating_unit_keys`, `required_roles`, or assignment confidence. If no primary-eligible candidate exists, the recommendation returns `primary_rule = None`, no unit or role recommendation, and neutral confidence `0`.
 
 ## Unit And Role Boundary
 

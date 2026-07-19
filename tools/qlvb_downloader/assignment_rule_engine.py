@@ -310,15 +310,20 @@ class AssignmentRuleEngine:
         *,
         evaluated_rule_count: int,
     ) -> AssignmentRecommendation:
+        primary_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.decision in {MatchDecision.MATCHED, MatchDecision.MATCHED_WITH_WARNING, MatchDecision.NEEDS_CLASSIFICATION}
+        ]
         eligible = [candidate for candidate in candidates if candidate.decision in {MatchDecision.MATCHED, MatchDecision.MATCHED_WITH_WARNING}]
         excluded_count = sum(1 for candidate in candidates if candidate.decision == MatchDecision.EXCLUDED)
-        primary = eligible[0] if eligible else (candidates[0] if candidates else None)
+        primary = primary_candidates[0] if primary_candidates else None
         conflicts = _find_top_conflicts(eligible)
         warnings: list[MatchWarningCode] = []
         unresolved_fields: list[str] = []
-        decision = primary.decision if primary else MatchDecision.NO_MATCH
+        decision = primary.decision if primary else _fallback_decision(candidates)
         lead_unit_key = primary.lead_unit_keys[0] if primary and len(primary.lead_unit_keys) == 1 else None
-        if primary and len(primary.lead_unit_keys) != 1 and primary.decision != MatchDecision.EXCLUDED:
+        if primary and len(primary.lead_unit_keys) != 1:
             warnings.append(MatchWarningCode.UNIT_UNRESOLVED)
             unresolved_fields.append("lead_unit_key")
         if conflicts:
@@ -338,7 +343,7 @@ class AssignmentRuleEngine:
             eligible_rule_count=len(eligible),
             excluded_rule_count=excluded_count,
             primary_rule=primary,
-            alternative_rules=[candidate for candidate in candidates if candidate is not primary and candidate.decision != MatchDecision.EXCLUDED][:5],
+            alternative_rules=[candidate for candidate in primary_candidates if candidate is not primary][:5],
             conflicting_rules=conflicts,
             decision=decision,
             confidence=primary.score if primary else 0.0,
@@ -563,6 +568,12 @@ def _find_top_conflicts(eligible: list[AssignmentRuleCandidate]) -> list[Assignm
         if set(top.lead_unit_keys) != set(candidate.lead_unit_keys) or set(top.required_role_codes) != set(candidate.required_role_codes):
             conflicts.append(candidate)
     return conflicts
+
+
+def _fallback_decision(candidates: list[AssignmentRuleCandidate]) -> MatchDecision:
+    if candidates and all(candidate.decision == MatchDecision.EXCLUDED for candidate in candidates):
+        return MatchDecision.EXCLUDED
+    return MatchDecision.NO_MATCH
 
 
 def _effective_units(units: list[AssignmentRuleUnit], as_of_date: str) -> list[AssignmentRuleUnit]:
