@@ -181,7 +181,8 @@ def test_token_match_does_not_match_partial_word():
     try:
         _create_rule(repo, conditions=[_condition(ctype=ConditionType.TARGET_ENTITY, value="bao", mode=MatchMode.TOKEN)])
         result = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["baocao"]))
-        assert result.recommendation.primary_rule.decision == MatchDecision.NO_MATCH
+        assert result.recommendation.primary_rule is None
+        assert result.recommendation.decision == MatchDecision.NO_MATCH
     finally:
         conn.close()
 
@@ -271,8 +272,10 @@ def test_required_keyword_missing():
     conn, repo = _seed()
     try:
         _create_rule(repo, conditions=[_condition(required=True, value="khong co", weight=100)])
-        candidate = AssignmentRuleEngine(repo).evaluate(_signals()).recommendation.primary_rule
+        evaluation = AssignmentRuleEngine(repo).evaluate(_signals())
+        candidate = evaluation.candidates[0]
         assert candidate.decision == MatchDecision.NO_MATCH
+        assert evaluation.recommendation.primary_rule is None
         assert MatchWarningCode.MISSING_REQUIRED_SIGNAL in candidate.warnings
     finally:
         conn.close()
@@ -317,7 +320,9 @@ def test_score_clamped_to_zero():
     conn, repo = _seed()
     try:
         _create_rule(repo, exclusions=[_exclusion(value="phu luc", hard=False, penalty=200)])
-        assert AssignmentRuleEngine(repo).evaluate(_signals()).recommendation.primary_rule.score == 0
+        evaluation = AssignmentRuleEngine(repo).evaluate(_signals())
+        assert evaluation.candidates[0].score == 0
+        assert evaluation.recommendation.primary_rule is None
     finally:
         conn.close()
 
@@ -358,7 +363,10 @@ def test_score_below_75_creates_no_match():
     try:
         conditions = [_condition(cid="c1", value="bao cao", weight=50), _condition(cid="c2", value="missing", weight=50)]
         _create_rule(repo, conditions=conditions)
-        assert AssignmentRuleEngine(repo).evaluate(_signals()).recommendation.primary_rule.decision == MatchDecision.NO_MATCH
+        evaluation = AssignmentRuleEngine(repo).evaluate(_signals())
+        assert evaluation.candidates[0].decision == MatchDecision.NO_MATCH
+        assert evaluation.recommendation.primary_rule is None
+        assert evaluation.recommendation.decision == MatchDecision.NO_MATCH
     finally:
         conn.close()
 
@@ -453,6 +461,135 @@ def test_hard_exclusion_has_explanation():
         _create_rule(repo, exclusions=[_exclusion(value="du toan", hard=True)])
         candidate = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"])).candidates[0]
         assert "hard exclusion" in candidate.explanation
+    finally:
+        conn.close()
+
+
+def test_only_hard_excluded_rule_has_no_primary_assignment():
+    conn, repo = _seed()
+    try:
+        _create_rule(repo, exclusions=[_exclusion(value="du toan", hard=True)])
+        rec = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"])).recommendation
+        assert rec.primary_rule is None
+        assert rec.decision == MatchDecision.EXCLUDED
+        assert rec.confidence == 0
+        assert rec.lead_unit_key is None
+        assert rec.coordinating_unit_keys == []
+        assert rec.required_roles == []
+    finally:
+        conn.close()
+
+
+def test_excluded_high_priority_rule_cannot_beat_lower_valid_rule():
+    conn, repo = _seed()
+    try:
+        _create_rule(
+            repo,
+            _rule("excluded-rule", "EXCLUDED-HIGH", priority=100),
+            exclusions=[_exclusion("excluded-rule", value="du toan", hard=True)],
+            units=[_unit("excluded-rule", key="TC")],
+            roles=[_role("excluded-rule")],
+        )
+        _create_rule(
+            repo,
+            _rule("valid-rule", "VALID-LOW", priority=1),
+            conditions=[
+                _condition("valid-rule", cid="valid-c1", value="bao cao", weight=80),
+                _condition("valid-rule", cid="valid-c2", value="missing", weight=20),
+            ],
+            units=[_unit("valid-rule", key="VP")],
+            roles=[_role("valid-rule")],
+        )
+        rec = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"])).recommendation
+        assert rec.primary_rule.rule_code == "VALID-LOW"
+        assert rec.lead_unit_key == "VP"
+    finally:
+        conn.close()
+
+
+def test_all_no_match_rules_have_no_primary_assignment():
+    conn, repo = _seed()
+    try:
+        _create_rule(repo, conditions=[_condition(value="khong khop", weight=100)])
+        rec = AssignmentRuleEngine(repo).evaluate(_signals()).recommendation
+        assert rec.primary_rule is None
+        assert rec.decision == MatchDecision.NO_MATCH
+        assert rec.lead_unit_key is None
+        assert rec.coordinating_unit_keys == []
+        assert rec.required_roles == []
+    finally:
+        conn.close()
+
+
+def test_mixed_excluded_and_no_match_rules_have_no_primary_assignment():
+    conn, repo = _seed()
+    try:
+        _create_rule(
+            repo,
+            _rule("excluded-rule", "EXCLUDED"),
+            exclusions=[_exclusion("excluded-rule", value="du toan", hard=True)],
+            units=[_unit("excluded-rule", key="TC")],
+            roles=[_role("excluded-rule")],
+        )
+        _create_rule(
+            repo,
+            _rule("no-match-rule", "NO-MATCH"),
+            conditions=[_condition("no-match-rule", value="khong khop", weight=100)],
+            units=[_unit("no-match-rule", key="VP")],
+            roles=[_role("no-match-rule")],
+        )
+        rec = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"])).recommendation
+        assert rec.primary_rule is None
+        assert rec.decision == MatchDecision.NO_MATCH
+        assert rec.lead_unit_key is None
+        assert rec.required_roles == []
+    finally:
+        conn.close()
+
+
+def test_excluded_rule_does_not_participate_in_top_rule_conflict():
+    conn, repo = _seed()
+    try:
+        _create_rule(repo, _rule("valid-rule", "VALID"), units=[_unit("valid-rule", key="VP")])
+        _create_rule(
+            repo,
+            _rule("excluded-rule", "EXCLUDED", priority=100),
+            exclusions=[_exclusion("excluded-rule", value="du toan", hard=True)],
+            units=[_unit("excluded-rule", key="TC")],
+            roles=[_role("excluded-rule")],
+        )
+        rec = AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"])).recommendation
+        assert rec.primary_rule.rule_code == "VALID"
+        assert rec.conflicting_rules == []
+        assert rec.decision == MatchDecision.MATCHED
+        assert rec.lead_unit_key == "VP"
+    finally:
+        conn.close()
+
+
+def test_excluded_candidate_is_retained_in_match_history():
+    conn, repo = _seed()
+    try:
+        _create_rule(repo, exclusions=[_exclusion(value="du toan", hard=True)])
+        AssignmentRuleEngine(repo).evaluate(_signals(keywords=["du toan"]), persist_matches=True)
+        matches = repo.list_matches_for_document("doc-1")
+        assert len(matches) == 1
+        assert matches[0]["decision"] == MatchDecision.EXCLUDED.value
+    finally:
+        conn.close()
+
+
+def test_excluded_fallback_result_is_deterministic():
+    conn, repo = _seed()
+    try:
+        _create_rule(repo, exclusions=[_exclusion(value="du toan", hard=True)])
+        engine = AssignmentRuleEngine(repo)
+        first = engine.evaluate(_signals(keywords=["du toan"])).recommendation
+        second = engine.evaluate(_signals(keywords=["du toan"])).recommendation
+        assert first.input_fingerprint == second.input_fingerprint
+        assert first.primary_rule is second.primary_rule is None
+        assert first.decision == second.decision
+        assert first.explanation == second.explanation
     finally:
         conn.close()
 
