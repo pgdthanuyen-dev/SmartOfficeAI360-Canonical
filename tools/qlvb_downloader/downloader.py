@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
+import hashlib
 import time
 import traceback
 from pathlib import Path
@@ -12,7 +13,25 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from .config import QLVBConfig, VERSION
 from .logger import build_logger
-from .models import AttachmentInfo, DocumentRecord, now_iso, safe_slug, mask_url_query, safe_slug, mask_url_query
+from .models import (
+    ATTACHMENT_DISCOVERED,
+    ATTACHMENT_DOWNLOAD_FAILED,
+    ATTACHMENT_DOWNLOAD_STARTED,
+    ATTACHMENT_DOWNLOADED_RAW,
+    ATTACHMENT_INVALID_FILE,
+    ATTACHMENT_VALIDATED,
+    DOCUMENT_FAILED,
+    DOCUMENT_NO_VALID_ATTACHMENT,
+    DOCUMENT_PROCESSING,
+    DOCUMENT_QUEUEABLE_STATUSES,
+    DOCUMENT_READY,
+    DOCUMENT_READY_WITH_WARNINGS,
+    DOCUMENT_SESSION_EXPIRED,
+    AttachmentInfo,
+    DocumentRecord,
+    mask_url_query,
+    now_iso,
+)
 from .parser import attachment_from_anchor, build_record_from_row, clean_text, guess_date, is_probable_attachment
 from .storage import StorageManager
 from .report import append_csv_report, write_html_run_report
@@ -21,6 +40,9 @@ from .paths import configure_bundled_playwright
 
 QLVB_ALLOWED_HOSTS = {"qlvb.laichau.gov.vn"}
 QLVB_DOWNLOAD_ALL_PATHS = ["/smartoffice/jbm/download_all.jsp"]
+QLVB_INCOMING_LABEL = "V\u0103n b\u1ea3n \u0111\u1ebfn"
+QLVB_OUTGOING_LABEL = "V\u0103n b\u1ea3n \u0111i"
+QLVB_DOWNLOAD_ALL_LABEL = "N\u00e9n v\u00e0 t\u1ea3i t\u1ea5t c\u1ea3"
 
 class QLVBDownloader:
     def __init__(self, config: QLVBConfig):
@@ -77,7 +99,7 @@ class QLVBDownloader:
                 if login_only:
                     self.logger.info("Dang nhap thanh cong va da luu phien.")
                     self.run_summary["status"] = "DONE"
-                    self.run_summary["login_status"] = "Đăng nhập thành công"
+                    self.run_summary["login_status"] = "ÄÄƒng nháº­p thÃ nh cÃ´ng"
                 else:
                     if self.config.use_fixed_urls:
                         sources = [
@@ -89,12 +111,12 @@ class QLVBDownloader:
                             if not url or not self._is_http_url(url):
                                 continue
                             self.run_summary["directions"][category] = self._process_direction(
-                                page, direction, max_items_value, 
+                                page, direction, max_items_value,
                                 fixed_url=url, category=category, planner=planner, knowledge=knowledge
                             )
-                        
+
                         if not any(s[2] for s in sources):
-                            self.logger.warning("use_fixed_urls = True nhưng không có link cố định nào được cấu hình.")
+                            self.logger.warning("use_fixed_urls = True nhÆ°ng khÃ´ng cÃ³ link cá»‘ Ä‘á»‹nh nÃ o Ä‘Æ°á»£c cáº¥u hÃ¬nh.")
                     else:
                         for direction in directions:
                             if direction not in ["incoming", "outgoing"]:
@@ -129,7 +151,7 @@ class QLVBDownloader:
             return {"valid": False, "error": "FIXED_URL_INVALID_SCHEME"}
         if allowed_host and allowed_host not in parsed.netloc:
             return {"valid": False, "error": "FIXED_URL_WRONG_HOST"}
-            
+
         configure_bundled_playwright()
         with sync_playwright() as p:
             context = p.chromium.launch_persistent_context(
@@ -140,22 +162,27 @@ class QLVBDownloader:
             try:
                 page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(self.config.browser.timeout_ms)
-                
+
                 self._ensure_logged_in(page, headless_value=self.config.browser.headless)
                 page.goto(url, wait_until="domcontentloaded")
                 self._safe_wait_networkidle(page)
-                
+
                 if not self._is_logged_in(page):
                     return {"valid": False, "error": "FIXED_URL_REDIRECTED_TO_LOGIN"}
-                    
+
                 breadcrumb = ""
                 try:
                     breadcrumb = clean_text(page.locator(".breadcrumb, .page-title, h1, h2, .nav-title").first.inner_text(timeout=1000))
                 except Exception:
                     pass
-                    
+
                 is_empty_state = False
-                empty_texts = ["không tìm thấy dữ liệu", "không có dữ liệu", "không có bản ghi", "no data available", "không có văn bản"]
+                empty_texts = [
+                    "khÃ´ng tÃ¬m tháº¥y dá»¯ liá»‡u", "khÃ´ng cÃ³ dá»¯ liá»‡u",
+                    "khÃ´ng cÃ³ báº£n ghi", "no data available", "khÃ´ng cÃ³ vÄƒn báº£n",
+                    "kh\u00f4ng t\u00ecm th\u1ea5y d\u1eef li\u1ec7u", "kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u",
+                    "kh\u00f4ng c\u00f3 b\u1ea3n ghi", "kh\u00f4ng c\u00f3 v\u0103n b\u1ea3n",
+                ]
                 try:
                     page_text = page.locator("body").inner_text(timeout=1000).lower()
                     if any(et in page_text for et in empty_texts):
@@ -168,13 +195,22 @@ class QLVBDownloader:
                     return {"valid": False, "error": "FIXED_URL_DOCUMENT_TABLE_NOT_FOUND"}
 
                 # Check direction mismatch
-                is_incoming = "văn bản đến" in breadcrumb.lower() or "van_ban_den" in url.lower()
-                is_outgoing = "văn bản đi" in breadcrumb.lower() or "vanban_di" in url.lower()
+                breadcrumb_l = breadcrumb.lower()
+                is_incoming = (
+                    "vÄƒn báº£n Ä‘áº¿n" in breadcrumb_l
+                    or QLVB_INCOMING_LABEL.lower() in breadcrumb_l
+                    or "van_ban_den" in url.lower()
+                )
+                is_outgoing = (
+                    "vÄƒn báº£n Ä‘i" in breadcrumb_l
+                    or QLVB_OUTGOING_LABEL.lower() in breadcrumb_l
+                    or "vanban_di" in url.lower()
+                )
                 if "incoming" in expected_direction and is_outgoing:
                     return {"valid": False, "error": "FIXED_URL_DIRECTION_MISMATCH"}
                 if "outgoing" in expected_direction and is_incoming:
                     return {"valid": False, "error": "FIXED_URL_DIRECTION_MISMATCH"}
-                    
+
                 headers = []
                 row_count = 0
                 if table:
@@ -197,7 +233,7 @@ class QLVBDownloader:
                             pass
 
                 direction = "incoming" if "incoming" in expected_direction else "outgoing"
-                
+
                 if row_count == 0 and is_empty_state:
                     return {
                         "valid": True,
@@ -206,7 +242,7 @@ class QLVBDownloader:
                         "direction": direction,
                         "record_count": 0,
                         "title": breadcrumb,
-                        "message": "Link hợp lệ, hiện chưa có dữ liệu",
+                        "message": "Link há»£p lá»‡, hiá»‡n chÆ°a cÃ³ dá»¯ liá»‡u",
                         "columns": headers
                     }
 
@@ -220,20 +256,20 @@ class QLVBDownloader:
                     "columns": headers
                 }
             except Exception as e:
-                return {"valid": False, "error": f"Lỗi không xác định: {e}"}
+                return {"valid": False, "error": f"Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh: {e}"}
             finally:
                 context.close()
 
     def _validate_config(self) -> None:
         missing = []
         if not (self.config.qlvb_base_url or self.config.login_url or getattr(self.config, 'incoming_url', '') or getattr(self.config, 'outgoing_url', '') or self.config.incoming_pending_url):
-            missing.append("địa chỉ/link QLVB")
+            missing.append("Ä‘á»‹a chá»‰/link QLVB")
         if not self.config.username:
-            missing.append("tên đăng nhập")
+            missing.append("tÃªn Ä‘Äƒng nháº­p")
         if not self.config.password and not self.config.browser.allow_manual_login:
-            missing.append("mật khẩu")
+            missing.append("máº­t kháº©u")
         if missing:
-            raise ValueError("Thiếu cấu hình: " + ", ".join(missing))
+            raise ValueError("Thiáº¿u cáº¥u hÃ¬nh: " + ", ".join(missing))
 
     def _goto(self, page: Page, url: str, label: str) -> None:
         if not self._is_http_url(url):
@@ -299,7 +335,7 @@ class QLVBDownloader:
         self.logger.info("Da o man hinh chinh; menu dong se duoc click tren DOM hien tai.")
 
     def _ensure_logged_in(self, page: Page, headless_value: bool = False) -> None:
-        # Sử dụng URL làm mồi (nếu là Lai Châu bị cấu hình thiếu /qlvbdh_lcu/main thì bù vào)
+        # Sá»­ dá»¥ng URL lÃ m má»“i (náº¿u lÃ  Lai ChÃ¢u bá»‹ cáº¥u hÃ¬nh thiáº¿u /qlvbdh_lcu/main thÃ¬ bÃ¹ vÃ o)
         probe_url = self._safe_home_url()
         if probe_url.strip("/") == "https://qlvb.laichau.gov.vn":
             probe_url = "https://qlvb.laichau.gov.vn/qlvbdh_lcu/main"
@@ -329,15 +365,15 @@ class QLVBDownloader:
 
         if self._detect_captcha(page):
             self._save_page_error(page, "captcha_login")
-            if self._wait_manual_login(page, probe_url, reason="Trang đăng nhập có CAPTCHA/OTP", headless_value=headless_value):
+            if self._wait_manual_login(page, probe_url, reason="Trang Ä‘Äƒng nháº­p cÃ³ CAPTCHA/OTP", headless_value=headless_value):
                 return
-            raise RuntimeError("Trang đăng nhập có CAPTCHA/OTP. Vui lòng chạy hiện trình duyệt, đăng nhập thủ công một lần rồi chạy lại để dùng phiên đã lưu.")
+            raise RuntimeError("Trang Ä‘Äƒng nháº­p cÃ³ CAPTCHA/OTP. Vui lÃ²ng cháº¡y hiá»‡n trÃ¬nh duyá»‡t, Ä‘Äƒng nháº­p thá»§ cÃ´ng má»™t láº§n rá»“i cháº¡y láº¡i Ä‘á»ƒ dÃ¹ng phiÃªn Ä‘Ã£ lÆ°u.")
 
         if not username or not password:
             self._save_page_error(page, "login_fields_not_found")
-            if self._wait_manual_login(page, probe_url, reason="Không tìm thấy ô tài khoản/mật khẩu", headless_value=headless_value):
+            if self._wait_manual_login(page, probe_url, reason="KhÃ´ng tÃ¬m tháº¥y Ã´ tÃ i khoáº£n/máº­t kháº©u", headless_value=headless_value):
                 return
-            raise RuntimeError("Không tìm thấy ô tên đăng nhập/mật khẩu. Cần cập nhật selector sau khi xem log/screenshot.")
+            raise RuntimeError("KhÃ´ng tÃ¬m tháº¥y Ã´ tÃªn Ä‘Äƒng nháº­p/máº­t kháº©u. Cáº§n cáº­p nháº­t selector sau khi xem log/screenshot.")
 
         if self.config.username and self.config.password:
             self.logger.info("Khong phat hien CAPTCHA, tu dong submit...")
@@ -352,9 +388,9 @@ class QLVBDownloader:
         self._goto(page, probe_url, "kiem tra sau dang nhap")
         if not self._is_logged_in(page):
             self._save_page_error(page, "login_failed")
-            if self._wait_manual_login(page, probe_url, reason="Đăng nhập tự động chưa thành công", headless_value=headless_value):
+            if self._wait_manual_login(page, probe_url, reason="ÄÄƒng nháº­p tá»± Ä‘á»™ng chÆ°a thÃ nh cÃ´ng", headless_value=headless_value):
                 return
-            raise RuntimeError("Đăng nhập chưa thành công. Kiểm tra tài khoản, mật khẩu, CAPTCHA/OTP hoặc selector.")
+            raise RuntimeError("ÄÄƒng nháº­p chÆ°a thÃ nh cÃ´ng. Kiá»ƒm tra tÃ i khoáº£n, máº­t kháº©u, CAPTCHA/OTP hoáº·c selector.")
         self.logger.info("Dang nhap thanh cong, phien trinh duyet da duoc luu.")
         self._update_dynamic_urls(page)
 
@@ -362,7 +398,7 @@ class QLVBDownloader:
         if headless_value or not self.config.browser.allow_manual_login:
             return False
         wait_seconds = max(10, int(self.config.browser.manual_login_wait_seconds or 120))
-        self.logger.warning("%s. Cho phep dang nhap thu cong trong %s giay. Sếp đăng nhập xong, tool sẽ tự kiểm tra lại.", reason, wait_seconds)
+        self.logger.warning("%s. Cho phep dang nhap thu cong trong %s giay. Sáº¿p Ä‘Äƒng nháº­p xong, tool sáº½ tá»± kiá»ƒm tra láº¡i.", reason, wait_seconds)
         deadline = time.time() + wait_seconds
         while time.time() < deadline:
             try:
@@ -370,7 +406,7 @@ class QLVBDownloader:
                     self.logger.info("Da phat hien dang nhap thu cong thanh cong.")
                     self._update_dynamic_urls(page)
                     return True
-                # Định kỳ thử mở lại link đích; nếu phiên đã có cookie thì sẽ vào thẳng danh sách.
+                # Äá»‹nh ká»³ thá»­ má»Ÿ láº¡i link Ä‘Ã­ch; náº¿u phiÃªn Ä‘Ã£ cÃ³ cookie thÃ¬ sáº½ vÃ o tháº³ng danh sÃ¡ch.
                 # Never reload while the user is solving CAPTCHA: doing so
                 # clears both the verification code and the filled fields.
                 login_form_visible = self._count_visible(page, self.config.selectors["login"]["password"]) > 0
@@ -391,6 +427,11 @@ class QLVBDownloader:
         return False
 
     def _is_logged_in(self, page: Page) -> bool:
+        try:
+            if page.is_closed():
+                return False
+        except Exception:
+            return False
         login_selectors = self.config.selectors["login"]
         if self._count_visible(page, login_selectors["password"]) > 0:
             return False
@@ -400,14 +441,19 @@ class QLVBDownloader:
             body = clean_text(page.locator("body").inner_text(timeout=5000)) if page.locator("body").count() else ""
         except Exception:
             body = ""
-        login_words = ["đăng nhập", "dang nhap", "login", "mật khẩu", "mat khau", "password"]
-        list_words = ["văn bản đến", "van ban den", "văn bản đi", "van ban di", "trích yếu", "so van ban", "số văn bản"]
+        login_words = ["Ä‘Äƒng nháº­p", "dang nhap", "login", "máº­t kháº©u", "mat khau", "password"]
+        list_words = [
+            "vÄƒn báº£n Ä‘áº¿n", "van ban den", "vÄƒn báº£n Ä‘i", "van ban di",
+            "trÃ­ch yáº¿u", "so van ban", "sá»‘ vÄƒn báº£n",
+            QLVB_INCOMING_LABEL.lower(), QLVB_OUTGOING_LABEL.lower(),
+            "tr\u00edch y\u1ebfu", "s\u1ed1 v\u0103n b\u1ea3n",
+        ]
         body_l = body.lower()
+        if any(w in body_l for w in login_words):
+            return False
         if any(w in body_l for w in list_words):
             return True
-        if len(body) < 120 and any(w in body_l for w in login_words):
-            return False
-        return bool(body)
+        return False
 
     def _detect_captcha(self, page: Page) -> bool:
         return self._count_visible(page, self.config.selectors["login"].get("captcha", [])) > 0
@@ -415,7 +461,11 @@ class QLVBDownloader:
     def open_document_direction(self, page: Page, direction: str) -> Page:
         if direction not in {"incoming", "outgoing"}:
             raise ValueError(f"Unsupported direction: {direction}")
-        label = "Văn bản đến" if direction == "incoming" else "Văn bản đi"
+        label = "VÄƒn báº£n Ä‘áº¿n" if direction == "incoming" else "VÄƒn báº£n Ä‘i"
+        label_candidates = [label]
+        unicode_label = QLVB_INCOMING_LABEL if direction == "incoming" else QLVB_OUTGOING_LABEL
+        if unicode_label not in label_candidates:
+            label_candidates.append(unicode_label)
         keywords = ["van_ban_den_ca_nhan", "van_ban_den", "vanban_den"] if direction == "incoming" else [
             "van_ban_di", "vanban_di", "vanban_di_da_banhanh", "vanban_di_cho_banhanh"
         ]
@@ -428,8 +478,14 @@ class QLVBDownloader:
         self.logger.info("Dang tim menu %s.", label)
 
         text_selectors = [
-            f"a:has-text('{label}')", f"button:has-text('{label}')",
-            f"[role='menuitem']:has-text('{label}')", f"[onclick]:has-text('{label}')",
+            selector
+            for candidate_label in label_candidates
+            for selector in (
+                f"a:has-text('{candidate_label}')",
+                f"button:has-text('{candidate_label}')",
+                f"[role='menuitem']:has-text('{candidate_label}')",
+                f"[onclick]:has-text('{candidate_label}')",
+            )
         ]
         keyword_selectors = [
             f"a[href*='{word}' i], [onclick*='{word}' i], [data-url*='{word}' i], [data-href*='{word}' i]"
@@ -514,7 +570,7 @@ class QLVBDownloader:
                     text = clean_text(item.inner_text(timeout=200))[:120]
                     href = (item.get_attribute("href") or "").strip().lower()
                     onclick = bool(item.get_attribute("onclick"))
-                    if "văn bản" not in text.lower() and "van ban" not in text.lower() and not onclick and not href:
+                    if "vÄƒn báº£n" not in text.lower() and "van ban" not in text.lower() and not onclick and not href:
                         continue
                     kind = "javascript" if href.startswith("javascript:") else "hash" if href.startswith("#") else "http" if self._is_http_url(href) else "relative" if href else "none"
                     elements.append({"text": text, "href_kind": kind, "onclick": onclick})
@@ -524,37 +580,48 @@ class QLVBDownloader:
 
     def _process_direction(self, page: Page, direction: str, max_items: int,
                            fixed_url: str = "", category: str = "", planner: bool = False, knowledge: bool = False) -> dict:
-        result = {"status": "RUNNING", "url": fixed_url or "DOM_MENU", "processed": 0, "skipped_existing": 0, "downloaded_files": 0, "errors": []}
+        result = {
+            "status": "RUNNING",
+            "url": fixed_url or "DOM_MENU",
+            "processed": 0,
+            "skipped_existing": 0,
+            "downloaded_files": 0,
+            "failed_records": 0,
+            "invalid_files": 0,
+            "records_without_valid_attachment": 0,
+            "session_expired_records": 0,
+            "errors": [],
+        }
         detail_page: Page | None = None
         try:
             if fixed_url:
-                self._goto(page, fixed_url, f"Link cố định {category}")
+                self._goto(page, fixed_url, f"Link cá»‘ Ä‘á»‹nh {category}")
                 if not self._is_logged_in(page):
-                    self.logger.warning("Trang yêu cầu đăng nhập lại (SESSION_EXPIRED).")
+                    self.logger.warning("Trang yÃªu cáº§u Ä‘Äƒng nháº­p láº¡i (SESSION_EXPIRED).")
                     self._ensure_logged_in(page, headless_value=self.config.browser.headless)
-                    self._goto(page, fixed_url, f"Retry link cố định {category} sau khi login")
-                
+                    self._goto(page, fixed_url, f"Retry link cá»‘ Ä‘á»‹nh {category} sau khi login")
+
                 table = self._find_document_table(page)
                 if not table:
                     is_empty_state = False
-                    empty_texts = ["không tìm thấy dữ liệu", "không có dữ liệu", "không có bản ghi", "no data available", "không có văn bản"]
+                    empty_texts = ["khÃ´ng tÃ¬m tháº¥y dá»¯ liá»‡u", "khÃ´ng cÃ³ dá»¯ liá»‡u", "khÃ´ng cÃ³ báº£n ghi", "no data available", "khÃ´ng cÃ³ vÄƒn báº£n"]
                     try:
                         page_text = page.locator("body").inner_text(timeout=1000).lower()
                         if any(et in page_text for et in empty_texts):
                             is_empty_state = True
                     except Exception:
                         pass
-                        
+
                     if is_empty_state:
-                        self.logger.info("Nguồn %s hiện chưa có dữ liệu (EMPTY).", category)
+                        self.logger.info("Nguá»“n %s hiá»‡n chÆ°a cÃ³ dá»¯ liá»‡u (EMPTY).", category)
                         result["status"] = "EMPTY"
-                        result["message"] = "Hiện chưa có văn bản đến chờ xử lý" if "pending" in category else "Hiện chưa có dữ liệu"
+                        result["message"] = "Hiá»‡n chÆ°a cÃ³ vÄƒn báº£n Ä‘áº¿n chá» xá»­ lÃ½" if "pending" in category else "Hiá»‡n chÆ°a cÃ³ dá»¯ liá»‡u"
                         return result
                     else:
                         raise RuntimeError("FIXED_URL_DOCUMENT_TABLE_NOT_FOUND")
             else:
                 page = self.open_document_direction(page, direction)
-                
+
             source_url = page.url
             headers = self._extract_headers(page)
             seen_ids: set[str] = set()
@@ -569,20 +636,20 @@ class QLVBDownloader:
                 if not records:
                     if page_no == 1:
                         is_empty_state = False
-                        empty_texts = ["không tìm thấy dữ liệu", "không có dữ liệu", "không có bản ghi", "no data available", "không có văn bản"]
+                        empty_texts = ["khÃ´ng tÃ¬m tháº¥y dá»¯ liá»‡u", "khÃ´ng cÃ³ dá»¯ liá»‡u", "khÃ´ng cÃ³ báº£n ghi", "no data available", "khÃ´ng cÃ³ vÄƒn báº£n"]
                         try:
                             page_text = page.locator("body").inner_text(timeout=1000).lower()
                             if any(et in page_text for et in empty_texts):
                                 is_empty_state = True
                         except Exception:
                             pass
-                        
+
                         if is_empty_state:
-                            self.logger.info("Nguồn %s hiện chưa có dữ liệu (EMPTY).", category)
+                            self.logger.info("Nguá»“n %s hiá»‡n chÆ°a cÃ³ dá»¯ liá»‡u (EMPTY).", category)
                             result["status"] = "EMPTY"
-                            result["message"] = "Hiện chưa có văn bản đến chờ xử lý" if "pending" in category else "Hiện chưa có dữ liệu"
+                            result["message"] = "Hiá»‡n chÆ°a cÃ³ vÄƒn báº£n Ä‘áº¿n chá» xá»­ lÃ½" if "pending" in category else "Hiá»‡n chÆ°a cÃ³ dá»¯ liá»‡u"
                             break
-                            
+
                     self.logger.warning("Khong doc duoc dong nao o danh sach %s trang %s.", direction, page_no)
                     self._save_page_error(page, f"no_rows_{direction}_page_{page_no}", extra={"headers": headers, "url": page.url})
                     break
@@ -592,7 +659,7 @@ class QLVBDownloader:
                         rec.source_category = category
                     rec.planner_candidate = planner
                     rec.knowledge_candidate = knowledge
-                    
+
                     if result["processed"] >= max_items:
                         break
                     rec.ensure_doc_id()
@@ -603,16 +670,16 @@ class QLVBDownloader:
                     # Deduplication check
                     external_doc_id = rec.doc_id
                     already_in_queue = False
-                    
+
                     # Check queue directory (both formats via get_queue_item_files)
                     queue_info = self.storage.get_queue_item_files(direction, external_doc_id)
                     if queue_info is not None:
                         already_in_queue = True
-                        
+
                     # Check if files directory status is READY
                     existing = self.storage.existing_status(rec) if self.config.download.skip_existing else None
-                    already_downloaded = existing and str(existing.get("status", "")).startswith("READY")
-                    
+                    already_downloaded = existing and str(existing.get("status", "")) in DOCUMENT_QUEUEABLE_STATUSES
+
                     if already_in_queue or already_downloaded:
                         self.logger.info("Bo qua ho so bi trung (external_doc_id: %s) | skipped_duplicate", external_doc_id)
                         result["skipped_existing"] += 1
@@ -621,18 +688,33 @@ class QLVBDownloader:
                     try:
                         self._process_record(detail_page, rec, list_page=page)
                         result["processed"] += 1
-                        result["downloaded_files"] += sum(1 for a in rec.attachments if a.status == "DOWNLOADED")
+                        result["downloaded_files"] += sum(1 for a in rec.attachments if a.status == ATTACHMENT_VALIDATED)
+                        result["invalid_files"] += sum(1 for a in rec.attachments if a.status == ATTACHMENT_INVALID_FILE)
+                        if rec.status == DOCUMENT_NO_VALID_ATTACHMENT:
+                            result["records_without_valid_attachment"] += 1
+                        if rec.status == DOCUMENT_SESSION_EXPIRED:
+                            result["session_expired_records"] += 1
+                        if rec.status not in DOCUMENT_QUEUEABLE_STATUSES:
+                            if rec.status in {DOCUMENT_FAILED, DOCUMENT_SESSION_EXPIRED}:
+                                result["failed_records"] += 1
+                            err = {
+                                "doc_id": rec.doc_id,
+                                "status": rec.status,
+                                "error": rec.error or rec.status,
+                            }
+                            result["errors"].append(err)
+                            self.run_summary["errors"].append(err)
                     except Exception as exc:
-                        rec.status = "ERROR"
+                        rec.status = DOCUMENT_FAILED
                         rec.error = str(exc)
                         self._write_outputs_and_report(rec)
                         err = {"doc_id": rec.doc_id, "error": str(exc)}
                         result["errors"].append(err)
                         self.run_summary["errors"].append(err)
+                        result["processed"] += 1
+                        result["failed_records"] += 1
                         self.logger.error("Loi xu ly ho so %s: %s", rec.doc_id, exc)
                         self.logger.debug(traceback.format_exc())
-                    finally:
-                        result["processed"] += 1
 
                 if result["processed"] >= max_items:
                     break
@@ -645,7 +727,7 @@ class QLVBDownloader:
             return result
         except Exception as exc:
             self._save_page_error(page, f"direction_error_{direction}")
-            result["status"] = "ERROR"
+            result["status"] = DOCUMENT_SESSION_EXPIRED if "SESSION_EXPIRED" in str(exc) else "FAILED"
             result["error"] = str(exc)
             self.run_summary["errors"].append({"direction": direction, "error": str(exc)})
             self.logger.error("Loi xu ly huong %s: %s", direction, exc)
@@ -676,7 +758,7 @@ class QLVBDownloader:
                                     return t
                     except Exception:
                         continue
-            
+
             if not allow_fallback:
                 return None
             # Fallback if no table matches: first visible table matching config selectors
@@ -696,7 +778,7 @@ class QLVBDownloader:
         table = self._find_document_table(page)
         if not table:
             return []
-            
+
         # Resolve container
         container = table
         try:
@@ -720,10 +802,10 @@ class QLVBDownloader:
     def _extract_records_from_current_page(self, page: Page, direction: str, source_url: str, headers: list[str]) -> list[DocumentRecord]:
         records: list[DocumentRecord] = []
         row_selectors = self.config.selectors["list"].get("rows", ["table tbody tr"])
-        
+
         # Determine search context: either resolved container or global page
         context = getattr(self, "_current_table_container", None) or page
-        
+
         rows: Locator | None = None
         for sel in row_selectors:
             try:
@@ -738,7 +820,7 @@ class QLVBDownloader:
                             relative_sel = relative_sel[6:]
                         elif relative_sel == "table":
                             relative_sel = "tr"
-                
+
                 loc = context.locator(relative_sel)
                 if loc.count() > 0:
                     rows = loc
@@ -764,24 +846,24 @@ class QLVBDownloader:
             cells = [c for c in cells if c]
 
             if self._is_header_row(row, row_text, cells, headers):
-                self.logger.debug("Bỏ qua dòng tiêu đề bảng, không phải hồ sơ: %s", row_text[:160])
+                self.logger.debug("Bá» qua dÃ²ng tiÃªu Ä‘á» báº£ng, khÃ´ng pháº£i há»“ sÆ¡: %s", row_text[:160])
                 continue
             if len(cells) <= 1 and len(row_text) < 15:
                 continue
             detail_url = self._extract_detail_url(row, page.url)
-            
+
             # Construct record
             rec = build_record_from_row(direction, source_url, i + 1, row_text, cells, detail_url, headers if len(headers) == len(cells) else None)
             rec.metadata["row_locator_index"] = i
             rec.metadata["detail_action_index"] = self._extract_detail_action_index(row)
-            
+
             # Validate document record immediately
             from .parser import validate_document_record
             status, reason = validate_document_record(rec)
             if status == "INVALID":
                 self.logger.warning("skipped_invalid_non_document_record | Ly do: %s | doc_id: %s", reason, rec.doc_id)
                 continue
-                
+
             records.append(rec)
         return records
 
@@ -794,24 +876,24 @@ class QLVBDownloader:
 
     def _is_header_row(self, row: Locator, row_text: str, cells: list[str], headers: list[str] | None) -> bool:
         lowered = row_text.lower()
-        
-        # 1. Chứa đồng thời nhiều nhãn
-        labels = ["trích yếu", "số ký hiệu", "số / ký hiệu", "ngày văn bản", "cơ quan ban hành", "người ký", "loại văn bản"]
+
+        # 1. Chá»©a Ä‘á»“ng thá»i nhiá»u nhÃ£n
+        labels = ["trÃ­ch yáº¿u", "sá»‘ kÃ½ hiá»‡u", "sá»‘ / kÃ½ hiá»‡u", "ngÃ y vÄƒn báº£n", "cÆ¡ quan ban hÃ nh", "ngÆ°á»i kÃ½", "loáº¡i vÄƒn báº£n"]
         hits = sum(1 for kw in labels if kw in lowered)
         if hits >= 3:
             return True
-            
-        # 2. Các cell bắt đầu bằng stt hoặc chứa phần lớn các header truyền vào
-        if cells and cells[0].strip().lower() in ("stt", "số", "tt"):
+
+        # 2. CÃ¡c cell báº¯t Ä‘áº§u báº±ng stt hoáº·c chá»©a pháº§n lá»›n cÃ¡c header truyá»n vÃ o
+        if cells and cells[0].strip().lower() in ("stt", "sá»‘", "tt"):
             return True
-            
+
         if headers and len(cells) >= 2:
             header_set = {clean_text(value).lower() for value in headers if clean_text(value)}
             header_hits = sum(1 for value in cells if value.lower() in header_set)
             if header_hits >= max(2, len(cells) // 2):
                 return True
-                
-        # 3. Có th thay vì td
+
+        # 3. CÃ³ th thay vÃ¬ td
         try:
             th_count = row.locator("th").count()
             td_count = row.locator("td").count()
@@ -819,8 +901,8 @@ class QLVBDownloader:
                 return True
         except Exception:
             pass
-            
-        # 4. Có class dạng header
+
+        # 4. CÃ³ class dáº¡ng header
         try:
             cls = row.get_attribute("class") or ""
             cls_low = cls.lower()
@@ -828,7 +910,7 @@ class QLVBDownloader:
                 return True
         except Exception:
             pass
-            
+
         return False
 
     def _extract_detail_url(self, row: Locator, base_url: str) -> str | None:
@@ -881,7 +963,7 @@ class QLVBDownloader:
                     return i
                 if fallback is None and (onclick or href.lower().startswith("javascript:")):
                     fallback = i
-                if any(word in text for word in ("chi tiết", "chi tiet", "trích yếu", "trich yeu", "xem")):
+                if any(word in text for word in ("chi tiáº¿t", "chi tiet", "trÃ­ch yáº¿u", "trich yeu", "xem")):
                     return i
             return fallback
         except Exception:
@@ -889,6 +971,7 @@ class QLVBDownloader:
 
     def _process_record(self, page: Page, rec: DocumentRecord, list_page: Page | None = None) -> None:
         self.logger.info("Xu ly ho so: %s | %s", rec.doc_id, rec.title[:120])
+        rec.status = DOCUMENT_PROCESSING
         active_page = page
         restore_list = False
         opened_detail = bool(rec.detail_url)
@@ -905,19 +988,31 @@ class QLVBDownloader:
             self.logger.warning("Ho so %s khong co link chi tiet; chi ghi metadata dong danh sach.", rec.doc_id)
 
         if opened_detail:
+            self._ensure_usable_detail_page(active_page, rec)
             self._merge_detail_metadata(active_page, rec)
             rec.attachments = self._extract_attachments(active_page)
 
         if not rec.attachments:
-            rec.status = "READY_NO_ATTACHMENT"
+            rec.status = DOCUMENT_NO_VALID_ATTACHMENT
+            rec.error = "NO_VALID_ATTACHMENT"
             self.logger.warning("Ho so %s chua tim thay file dinh kem.", rec.doc_id)
         elif self.config.download.dry_run:
-            rec.status = "READY_DRY_RUN"
+            rec.status = DOCUMENT_NO_VALID_ATTACHMENT
+            rec.error = "DRY_RUN_NO_VALID_ATTACHMENT"
             self.logger.info("DRY RUN: chi ghi metadata, khong tai tep dinh kem.")
         else:
             self._download_attachments(active_page, rec)
-            downloaded = sum(1 for a in rec.attachments if a.status == "DOWNLOADED")
-            rec.status = "READY" if downloaded > 0 else "READY_ATTACHMENT_ERROR"
+            validated = sum(1 for a in rec.attachments if a.status == ATTACHMENT_VALIDATED)
+            invalid = sum(1 for a in rec.attachments if a.status in {ATTACHMENT_INVALID_FILE, ATTACHMENT_DOWNLOAD_FAILED})
+            if validated > 0 and invalid == 0:
+                rec.status = DOCUMENT_READY
+                rec.error = None
+            elif validated > 0:
+                rec.status = DOCUMENT_READY_WITH_WARNINGS
+                rec.error = f"{invalid} attachment(s) invalid or failed"
+            else:
+                rec.status = DOCUMENT_NO_VALID_ATTACHMENT
+                rec.error = "NO_VALID_ATTACHMENT"
 
         self._write_outputs_and_report(rec)
         if active_page is not page and active_page is not list_page:
@@ -938,7 +1033,7 @@ class QLVBDownloader:
             "[role='dialog']:visible button[aria-label*='close' i]",
             ".modal:visible button.close", ".modal:visible .btn-close",
             ".ui-dialog:visible .ui-dialog-titlebar-close",
-            "button:visible:has-text('Đóng')", "button:visible:has-text('Dong')",
+            "button:visible:has-text('ÄÃ³ng')", "button:visible:has-text('Dong')",
         ):
             try:
                 loc = page.locator(selector)
@@ -947,6 +1042,23 @@ class QLVBDownloader:
                     return
             except Exception:
                 continue
+
+    def _ensure_usable_detail_page(self, page: Page, rec: DocumentRecord) -> None:
+        try:
+            if page.is_closed():
+                raise RuntimeError("DETAIL_PAGE_CLOSED")
+            current_url = page.url or ""
+        except Exception as exc:
+            raise RuntimeError(f"DETAIL_PAGE_UNUSABLE|{exc}") from exc
+        if current_url.startswith("about:"):
+            rec.status = DOCUMENT_FAILED
+            rec.error = "DETAIL_PAGE_ABOUT_BLANK"
+            raise RuntimeError("DETAIL_PAGE_ABOUT_BLANK")
+        parsed = urlparse(current_url)
+        if parsed.scheme in {"http", "https"} and parsed.hostname and parsed.hostname.lower() not in QLVB_ALLOWED_HOSTS:
+            rec.status = DOCUMENT_FAILED
+            rec.error = "DETAIL_PAGE_UNEXPECTED_HOST"
+            raise RuntimeError("DETAIL_PAGE_UNEXPECTED_HOST")
 
     def _open_detail_by_saved_action(self, list_page: Page, rec: DocumentRecord) -> tuple[Page, bool] | None:
         action_index = rec.metadata.get("detail_action_index")
@@ -970,13 +1082,24 @@ class QLVBDownloader:
             actions.nth(int(action_index)).evaluate("el => { if(el.getAttribute('onclick')) { let fn = new Function(el.getAttribute('onclick')); fn.call(el); } else { el.click(); } }")
         except Exception:
             actions.nth(int(action_index)).click(force=True)
-            
+
         list_page.wait_for_timeout(2000)
         self._safe_wait_networkidle(list_page, timeout=8000)
         new_pages = [p for p in list_page.context.pages if p not in before_pages]
         if new_pages:
             detail = new_pages[-1]
             detail.wait_for_load_state("domcontentloaded", timeout=self.config.browser.timeout_ms)
+            if (detail.url or "").startswith("about:"):
+                try:
+                    detail.wait_for_url(lambda url: not str(url).startswith("about:"), timeout=3000)
+                except Exception:
+                    self.logger.warning("Popup chi tiet van la about:blank, dong popup va bo qua ho so %s.", rec.doc_id)
+                    try:
+                        detail.close()
+                    except Exception:
+                        pass
+                    return None
+            self._ensure_usable_detail_page(detail, rec)
             return detail, False
         if list_page.url != before_url:
             return list_page, True
@@ -1011,7 +1134,7 @@ class QLVBDownloader:
             "title": rec.title,
             "status": rec.status,
             "attachment_total": len(rec.attachments),
-            "attachment_downloaded": sum(1 for a in rec.attachments if a.status == "DOWNLOADED"),
+            "attachment_downloaded": sum(1 for a in rec.attachments if a.status == ATTACHMENT_VALIDATED),
             "document_dir": paths.get("document_dir", ""),
             "queue_ready_dir": paths.get("queue_ready_dir", ""),
             "error": rec.error or "",
@@ -1059,10 +1182,10 @@ class QLVBDownloader:
                     return v
             return ""
 
-        rec.doc_no = rec.doc_no or first_pair_contains(["số", "ký hiệu"])
-        rec.doc_date = rec.doc_date or first_pair_contains(["ngày"])
-        rec.issuing_agency = rec.issuing_agency or first_pair_contains(["cơ quan", "nơi gửi", "đơn vị", "người gửi"])
-        rec.title = rec.title or first_pair_contains(["trích yếu", "nội dung", "tiêu đề", "tên văn bản"])
+        rec.doc_no = rec.doc_no or first_pair_contains(["sá»‘", "kÃ½ hiá»‡u"])
+        rec.doc_date = rec.doc_date or first_pair_contains(["ngÃ y"])
+        rec.issuing_agency = rec.issuing_agency or first_pair_contains(["cÆ¡ quan", "nÆ¡i gá»­i", "Ä‘Æ¡n vá»‹", "ngÆ°á»i gá»­i"])
+        rec.title = rec.title or first_pair_contains(["trÃ­ch yáº¿u", "ná»™i dung", "tiÃªu Ä‘á»", "tÃªn vÄƒn báº£n"])
         rec.summary = rec.summary or rec.title
         if not rec.doc_date:
             rec.doc_date = guess_date(body_text)
@@ -1070,13 +1193,13 @@ class QLVBDownloader:
     def _extract_attachments(self, page: Page) -> list[AttachmentInfo]:
         attachments: list[AttachmentInfo] = []
         seen = set()
-        
+
         # QC-003: Tim nut Nen va tai tat ca
         zip_loc = None
         zip_selectors = [
-            page.locator("a, button").filter(has_text=re.compile(r"(nén và )?tải tất cả", re.I)),
+            page.locator("a, button").filter(has_text=re.compile(r"(nÃ©n vÃ  )?táº£i táº¥t cáº£", re.I)),
             page.locator("[onclick*='downloadAll' i], [onclick*='taiTatCa' i], [href*='filedownload']"),
-            page.locator("[title*='Nén'], [title*='tải tất cả' i], [aria-label*='Nén'], [aria-label*='tải tất cả' i]")
+            page.locator("[title*='NÃ©n'], [title*='táº£i táº¥t cáº£' i], [aria-label*='NÃ©n'], [aria-label*='táº£i táº¥t cáº£' i]")
         ]
         for loc in zip_selectors:
             try:
@@ -1093,13 +1216,13 @@ class QLVBDownloader:
                 href = f"javascript:{onclick}"
             if not href.lower().startswith("javascript:") and not href.startswith("http"):
                 href = urljoin(page.url, href)
-            
+
             if href:
                 info = AttachmentInfo(
-                    text="Nén và tải tất cả",
+                    text=QLVB_DOWNLOAD_ALL_LABEL,
                     original_filename="tat_ca_dinh_kem.zip",
                     href=href,
-                    status="PENDING",
+                    status=ATTACHMENT_DISCOVERED,
                     saved_path=""
                 )
                 attachments.append(info)
@@ -1133,44 +1256,48 @@ class QLVBDownloader:
         downloaded_archives = 0
         extracted_files = 0
         materialized_files = 0
-        
+
         for idx, att in enumerate(rec.attachments, start=1):
             self.logger.info("Tai tep %s/%s: %s", idx, len(rec.attachments), att.href)
             last_exc = None
             for attempt in range(1, attempts + 1):
                 try:
+                    att.status = ATTACHMENT_DOWNLOAD_STARTED
                     saved = self._download_by_click_or_request(page, rec, att.href, idx)
-                    if saved.stat().st_size < self.config.download.min_file_size_bytes:
-                        raise RuntimeError(f"File tai ve qua nho: {saved.stat().st_size} bytes")
                     att.saved_path = str(saved)
                     att.original_filename = saved.name
-                    att.status = "DOWNLOADED"
-                    
+                    att.status = ATTACHMENT_VALIDATED
+                    validation = self._validate_downloaded_file(saved, {})
+                    att.validation_sha256 = validation["sha256"]
+                    att.validation_size_bytes = validation["size_bytes"]
+                    att.validation_content_type = validation.get("content_type")
+
                     downloaded_files += 1
                     materialized_files += 1
-                    
+
                     if saved.suffix.lower() == ".zip":
                         downloaded_archives += 1
                         extracted = self._extract_zip_bundle(rec, saved)
                         extracted_files += len(extracted)
                         materialized_files += len(extracted)
-                        
+
                     break
                 except Exception as exc:
                     last_exc = exc
-                    att.status = "ERROR"
+                    att.status = ATTACHMENT_INVALID_FILE if self._is_invalid_file_error(exc) else ATTACHMENT_DOWNLOAD_FAILED
                     att.error = str(exc)
                     self.logger.warning("Tai tep loi lan %s/%s: %s | %s", attempt, attempts, att.href, exc)
-                    import time
                     time.sleep(1 + attempt)
-            if att.status != "DOWNLOADED":
+            if att.status != ATTACHMENT_VALIDATED:
                 self.logger.error("Khong tai duoc tep sau %s lan: %s | %s", attempts, att.href, last_exc)
-                
+
         rec.metadata["download_stats"] = {
             "downloaded_files": downloaded_files,
             "downloaded_archives": downloaded_archives,
             "extracted_files": extracted_files,
             "materialized_files": materialized_files,
+            "invalid_files": sum(1 for a in rec.attachments if a.status == ATTACHMENT_INVALID_FILE),
+            "failed_files": sum(1 for a in rec.attachments if a.status == ATTACHMENT_DOWNLOAD_FAILED),
         }
 
     def _locator_for_href(self, page: Page, href: str) -> Locator | None:
@@ -1186,20 +1313,88 @@ class QLVBDownloader:
             return None
         return None
 
+    def _is_download_response_candidate(self, page: Page, href: str, response) -> bool:
+        if getattr(response, "status", 0) != 200:
+            return False
+        url = getattr(response, "url", "") or ""
+        if not self._is_allowed_download_url(url):
+            return False
+        headers = getattr(response, "headers", {}) or {}
+        content_type = headers.get("content-type", "").lower()
+        content_disposition = headers.get("content-disposition", "").lower()
+        if "attachment" not in content_disposition:
+            return False
+        if content_type.startswith("text/html"):
+            return False
+        if href and not href.lower().startswith("javascript:"):
+            expected = urljoin(page.url, href)
+            parsed_expected = urlparse(expected)
+            parsed_actual = urlparse(url)
+            if parsed_expected.hostname and parsed_actual.hostname and parsed_expected.hostname.lower() != parsed_actual.hostname.lower():
+                return False
+            if parsed_expected.path and parsed_actual.path != parsed_expected.path:
+                return False
+        return True
+
+    def _is_allowed_download_url(self, value: str) -> bool:
+        parsed = urlparse(value or "")
+        if parsed.scheme in {"about", "data", "javascript"}:
+            return False
+        if parsed.scheme in {"http", "https"}:
+            return bool(parsed.hostname and parsed.hostname.lower() in QLVB_ALLOWED_HOSTS)
+        return True
+
+    def _temp_download_path(self, target: Path) -> Path:
+        candidate = target.with_name(target.name + ".part")
+        counter = 2
+        while candidate.exists():
+            candidate = target.with_name(f"{target.name}.{counter}.part")
+            counter += 1
+        return candidate
+
+    def _finalize_validated_download(
+        self,
+        target: Path,
+        headers: dict,
+        source: str,
+        source_url: str,
+        write_body,
+    ) -> tuple[Path, dict]:
+        if not self._is_allowed_download_url(source_url):
+            raise RuntimeError("DOWNLOAD_SOURCE_URL_INVALID")
+        part_path = self._temp_download_path(target)
+        write_body(part_path)
+        validation = self._validate_downloaded_file(
+            part_path,
+            headers,
+            expected_filename=target.name,
+            source_url=source_url,
+        )
+        part_path.replace(target)
+        self.logger.info("Tai tep hop le qua %s: %s", source, target.name)
+        return target, validation
+
     def _download_by_click_or_request(self, page: Page, rec: DocumentRecord, href: str, idx: int) -> Path:
         locator = self._locator_for_href(page, href)
-        intercepted_path = None
-        
+        intercepted: tuple[Path, dict] | None = None
+
         def handle_response(response):
-            nonlocal intercepted_path
-            if response.status == 200 and ("application/zip" in response.headers.get("content-type", "").lower() or "attachment" in response.headers.get("content-disposition", "").lower()):
+            nonlocal intercepted
+            if intercepted is not None:
+                return
+            if self._is_download_response_candidate(page, href, response):
                 try:
                     filename = self._filename_from_response(response.url, response.headers, idx)
                     target = self.storage.next_download_path(rec, filename, idx)
-                    target.write_bytes(response.body())
-                    intercepted_path = target
-                except Exception:
-                    pass
+                    intercepted = self._finalize_validated_download(
+                        target,
+                        response.headers,
+                        "response_interceptor",
+                        response.url,
+                        lambda part_path: part_path.write_bytes(response.body()),
+                    )
+                except Exception as exc:
+                    self.logger.warning("Bo qua response download khong hop le: %s", exc)
 
         if href.lower().startswith("javascript:"):
             return self.trigger_qlvb_attachment_download(page, locator, rec, href, idx)
@@ -1212,26 +1407,38 @@ class QLVBDownloader:
                 download = download_info.value
                 suggested = download.suggested_filename or f"tep_dinh_kem_{idx}.bin"
                 target = self.storage.next_download_path(rec, suggested, idx)
-                download.save_as(str(target))
+                final_path, _validation = self._finalize_validated_download(
+                    target,
+                    {},
+                    "browser_download",
+                    href,
+                    lambda part_path: download.save_as(str(part_path)),
+                )
                 page.remove_listener("response", handle_response)
-                return target
+                return final_path
             except Exception as exc:
                 self.logger.warning("Click khong bat duoc download (%s), chuyen sang tai truc tiep neu co the.", exc)
                 page.remove_listener("response", handle_response)
-                if intercepted_path and intercepted_path.exists():
-                    self.logger.info("Da bat duoc file thong qua response interceptor: %s", intercepted_path)
-                    return intercepted_path
+                if intercepted and intercepted[0].exists():
+                    self.logger.info("Da bat duoc file thong qua response interceptor: %s", intercepted[0])
+                    return intercepted[0]
 
         if href.lower().startswith("javascript:"):
-            raise RuntimeError("Link tải là javascript và click không tạo download. Cần vá selector/luồng tải theo log.")
+            raise RuntimeError("Link táº£i lÃ  javascript vÃ  click khÃ´ng táº¡o download. Cáº§n vÃ¡ selector/luá»“ng táº£i theo log.")
 
         response = page.context.request.get(href, timeout=self.config.browser.timeout_ms)
         if not response.ok:
-            raise RuntimeError(f"HTTP {response.status} khi tải file")
+            raise RuntimeError(f"HTTP {response.status} khi táº£i file")
         filename = self._filename_from_response(href, response.headers, idx)
         target = self.storage.next_download_path(rec, filename, idx)
-        target.write_bytes(response.body())
-        return target
+        final_path, _validation = self._finalize_validated_download(
+            target,
+            response.headers,
+            "direct_request",
+            href,
+            lambda part_path: part_path.write_bytes(response.body()),
+        )
+        return final_path
 
     def _filename_from_response(self, href: str, headers: dict, idx: int) -> str:
         cd = headers.get("content-disposition") or headers.get("Content-Disposition") or ""
@@ -1270,8 +1477,9 @@ class QLVBDownloader:
     def _capture_runtime_download_url(self, page: Page, element: Locator, click_url: str) -> str | None:
         page.evaluate('''() => {
             window.__smartofficeOriginalOpen = window.open;
-            window.open = function(name, url) {
-                window.__smartofficeCapturedDownloadUrl = url;
+            window.open = function(url, target, features) {
+                window.__smartofficeCapturedDownloadUrl = url || target;
+                return null;
             };
         }''')
         try:
@@ -1291,23 +1499,23 @@ class QLVBDownloader:
     def _validate_captured_download_url(self, captured: str, detail_url: str) -> str:
         if not captured or captured.startswith("javascript:") or captured.startswith("about:blank") or captured.startswith("http://"):
             raise RuntimeError("CAPTURED_DOWNLOAD_URL_INVALID")
-            
+
         from urllib.parse import urlparse, urljoin
         absolute = urljoin(detail_url, captured)
         parsed = urlparse(absolute)
-        
+
         if parsed.scheme != "https":
             raise RuntimeError("CAPTURED_DOWNLOAD_URL_INVALID")
-            
-        
+
+
         if parsed.hostname.lower() not in QLVB_ALLOWED_HOSTS:
             raise RuntimeError("UNEXPECTED_DOWNLOAD_HOST")
-            
+
         # FIX for QC-004: use endswith instead of exact match
         valid_path = any(parsed.path.endswith(p) for p in QLVB_DOWNLOAD_ALL_PATHS)
         if not valid_path:
             raise RuntimeError("UNEXPECTED_DOWNLOAD_PATH")
-            
+
         return absolute
 
     def _click_attachment_element(self, page: Page, element: Locator, href: str) -> None:
@@ -1316,29 +1524,105 @@ class QLVBDownloader:
         except Exception:
             element.evaluate("el => el.click()")
 
-    def _validate_downloaded_file(self, path: Path, response_headers: dict) -> None:
+    def _validate_downloaded_file(
+        self,
+        path: Path,
+        response_headers: dict,
+        expected_filename: str | None = None,
+        source_url: str | None = None,
+    ) -> dict:
+        if source_url and not self._is_allowed_download_url(source_url):
+            raise RuntimeError("DOWNLOAD_SOURCE_URL_INVALID")
+        if not path.exists():
+            raise RuntimeError("DOWNLOADED_FILE_MISSING")
+
+        size_bytes = path.stat().st_size
+        min_size = max(1, int(getattr(self.config.download, "min_file_size_bytes", 1) or 1))
+        if size_bytes < min_size:
+            raise RuntimeError(f"DOWNLOADED_FILE_TOO_SMALL|{size_bytes}")
+
         data = path.read_bytes()
-        if b"<!DOCTYPE html>" in data and b"password" in data:
+        if not data:
+            raise RuntimeError("DOWNLOADED_FILE_EMPTY")
+
+        headers = {str(k).lower(): str(v) for k, v in (response_headers or {}).items()}
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        filename = expected_filename or path.name
+        if filename.endswith(".part"):
+            filename = filename[:-5]
+        suffix = Path(filename).suffix.lower()
+        prefix = data[:4096].lower()
+
+        if (
+            content_type.startswith("text/html")
+            or b"<!doctype html" in prefix
+            or b"<html" in prefix
+            or b"<form" in prefix and any(marker in prefix for marker in (b"password", b"login", b"dang nhap"))
+        ):
             raise RuntimeError("DOWNLOADED_HTML_LOGIN_PAGE|SESSION_EXPIRED")
-            
+
+        if content_type and content_type not in {
+            "application/pdf",
+            "application/zip",
+            "application/x-zip-compressed",
+            "application/octet-stream",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "binary/octet-stream",
+        }:
+            raise RuntimeError(f"DOWNLOADED_CONTENT_TYPE_UNEXPECTED|{content_type}")
+
         import zipfile
         import io
-        is_zip = path.suffix.lower() == ".zip" or response_headers.get("content-type") == "application/zip"
-        is_docx = path.suffix.lower() == ".docx"
-        
-        if is_zip or is_docx:
+
+        is_pdf = suffix == ".pdf" or content_type == "application/pdf"
+        is_docx = suffix == ".docx" or content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        is_xlsx = suffix == ".xlsx" or content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        is_zip = suffix == ".zip" or content_type in {"application/zip", "application/x-zip-compressed"}
+        is_ole = suffix in {".doc", ".xls"}
+
+        if is_pdf and not data.startswith(b"%PDF"):
+            raise RuntimeError("DOWNLOADED_FILE_INVALID")
+        if is_ole and not data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            raise RuntimeError("DOWNLOADED_FILE_INVALID")
+
+        if is_zip or is_docx or is_xlsx:
             if not data.startswith(b"PK"):
                 raise RuntimeError("DOWNLOADED_FILE_INVALID")
             try:
                 with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                    if len(zf.infolist()) == 0:
+                    names = zf.namelist()
+                    if len(names) == 0:
                         raise RuntimeError("DOWNLOADED_ZIP_INVALID" if is_zip else "DOWNLOADED_FILE_INVALID")
-                    if is_docx:
-                        names = zf.namelist()
-                        if "[Content_Types].xml" not in names and "word/document.xml" not in names:
-                            raise RuntimeError("DOWNLOADED_FILE_INVALID")
-            except zipfile.BadZipFile:
-                raise RuntimeError("DOWNLOADED_FILE_INVALID")
+                    if is_docx and ("[Content_Types].xml" not in names or "word/document.xml" not in names):
+                        raise RuntimeError("DOWNLOADED_FILE_INVALID")
+                    if is_xlsx and ("[Content_Types].xml" not in names or "xl/workbook.xml" not in names):
+                        raise RuntimeError("DOWNLOADED_FILE_INVALID")
+            except zipfile.BadZipFile as exc:
+                raise RuntimeError("DOWNLOADED_FILE_INVALID") from exc
+
+        return {
+            "size_bytes": size_bytes,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "content_type": content_type,
+            "filename": filename,
+        }
+
+    @staticmethod
+    def _is_invalid_file_error(exc: Exception) -> bool:
+        text = str(exc)
+        markers = (
+            "DOWNLOADED_",
+            "INVALID_FILE",
+            "CONTENT_TYPE",
+            "CAPTURED_DOWNLOAD_URL_INVALID",
+            "UNEXPECTED_DOWNLOAD_HOST",
+            "UNEXPECTED_DOWNLOAD_PATH",
+            "DOWNLOAD_SOURCE_URL_INVALID",
+        )
+        return any(marker in text for marker in markers)
 
     def _extract_zip_bundle(self, record, zip_path: Path) -> list[Path]:
         import zipfile
@@ -1357,18 +1641,21 @@ class QLVBDownloader:
     def trigger_qlvb_attachment_download(self, page: Page, element: Locator, record, click_url: str, att_idx: int, timeout_seconds: int = 15) -> Path:
         captured = self._capture_runtime_download_url(page, element, click_url)
         absolute = self._validate_captured_download_url(captured, page.url)
-        
+
         response = page.context.request.get(absolute, headers={"Referer": page.url}, timeout=timeout_seconds * 1000)
         if not response.ok:
             raise RuntimeError(f"HTTP {response.status}")
-            
+
         filename = self._filename_from_response(absolute, response.headers, att_idx)
         target = self.storage.next_download_path(record, filename, att_idx)
-        target.write_bytes(response.body())
-        
-        self._validate_downloaded_file(target, response.headers)
-        
-        return target
+        final_path, _validation = self._finalize_validated_download(
+            target,
+            response.headers,
+            "javascript_adapter",
+            absolute,
+            lambda part_path: part_path.write_bytes(response.body()),
+        )
+        return final_path
 
     def _save_page_error(self, page: Page, name: str, extra: dict | None = None) -> None:
         html = None

@@ -3,7 +3,7 @@ import shutil
 import json
 import hashlib
 from pathlib import Path
-from tools.qlvb_downloader.models import DocumentRecord, AttachmentInfo
+from tools.qlvb_downloader.models import ATTACHMENT_INVALID_FILE, ATTACHMENT_VALIDATED, DocumentRecord, AttachmentInfo
 from tools.qlvb_downloader.storage import StorageManager
 
 def sha256_checksum(filepath):
@@ -56,8 +56,8 @@ def run_tests():
         rec.ensure_doc_id()
         
         rec.attachments = [
-            AttachmentInfo(text="Văn bản chính thức", href="http://example.com/chinh.pdf", saved_path=str(main_src), status="DOWNLOADED"),
-            AttachmentInfo(text="Phụ lục 1", href="http://example.com/phuluc1.xlsx", saved_path=str(attach_src), status="DOWNLOADED")
+            AttachmentInfo(text="Văn bản chính thức", href="http://example.com/chinh.pdf", saved_path=str(main_src), status=ATTACHMENT_VALIDATED),
+            AttachmentInfo(text="Phụ lục 1", href="http://example.com/phuluc1.xlsx", saved_path=str(attach_src), status=ATTACHMENT_VALIDATED)
         ]
         rec.status = "READY"
         
@@ -148,3 +148,63 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
+
+
+def test_ready_no_attachment_does_not_create_ready_marker(tmp_path):
+    rec = DocumentRecord(
+        direction="incoming",
+        source_url="https://qlvb.laichau.gov.vn/incoming",
+        row_index=1,
+        row_text="row",
+        doc_id="incoming_no_valid",
+        title="No valid attachment",
+    )
+    rec.attachments = [
+        AttachmentInfo(
+            text="bad",
+            href="https://qlvb.laichau.gov.vn/bad.pdf",
+            saved_path=str(tmp_path / "bad.pdf"),
+            status=ATTACHMENT_INVALID_FILE,
+            error="DOWNLOADED_HTML_LOGIN_PAGE|SESSION_EXPIRED",
+        )
+    ]
+    rec.status = "READY"
+
+    storage = StorageManager(tmp_path / "data")
+    paths = storage.write_document_outputs(rec)
+    queue_dir = Path(paths["queue_ready_dir"])
+
+    assert rec.status == "NO_VALID_ATTACHMENT"
+    assert queue_dir.name.endswith("_ERROR")
+    assert not (queue_dir / ".ready").exists()
+    assert not (queue_dir / "manifest.json").exists()
+
+
+def test_validated_attachment_creates_ready_once(tmp_path):
+    src = tmp_path / "valid.pdf"
+    src.write_bytes(b"%PDF-1.4\n%%EOF")
+    rec = DocumentRecord(
+        direction="incoming",
+        source_url="https://qlvb.laichau.gov.vn/incoming",
+        row_index=1,
+        row_text="row",
+        doc_id="incoming_valid",
+        title="Valid attachment",
+    )
+    rec.attachments = [
+        AttachmentInfo(
+            text="main",
+            href="https://qlvb.laichau.gov.vn/valid.pdf",
+            saved_path=str(src),
+            status=ATTACHMENT_VALIDATED,
+        )
+    ]
+    rec.status = "READY"
+
+    storage = StorageManager(tmp_path / "data")
+    paths = storage.write_document_outputs(rec)
+    queue_dir = Path(paths["queue_ready_dir"])
+
+    assert (queue_dir / ".ready").exists()
+    assert (queue_dir / "manifest.json").exists()
+    assert len(list(queue_dir.glob(".ready"))) == 1

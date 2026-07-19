@@ -7,7 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import DocumentRecord, now_iso, safe_slug
+from .models import (
+    ATTACHMENT_VALIDATED,
+    DOCUMENT_NO_VALID_ATTACHMENT,
+    DOCUMENT_QUEUEABLE_STATUSES,
+    DocumentRecord,
+    now_iso,
+    safe_slug,
+)
 from .extractor import extract_text_for_manifest
 from .index_db import upsert_document, get_default_db_path, init_db
 
@@ -130,7 +137,16 @@ class StorageManager:
     def write_document_outputs(self, record: DocumentRecord) -> dict[str, str]:
         doc_dir = self.document_dir(record)
         record.ensure_doc_id()
-        is_ready = str(record.status).startswith("READY")
+        validated_attachments = [
+            a for a in record.attachments
+            if a.status == ATTACHMENT_VALIDATED and a.saved_path
+        ]
+        queueable_status = record.status in DOCUMENT_QUEUEABLE_STATUSES
+        if queueable_status and not validated_attachments:
+            record.status = DOCUMENT_NO_VALID_ATTACHMENT
+            record.error = record.error or "NO_VALID_ATTACHMENT"
+            queueable_status = False
+        is_ready = queueable_status
         ready_dir = self.queue_ready_dir(record) if is_ready else (self.queue_root / ("incoming" if record.direction == "incoming" else "outgoing") / f"{record.doc_id}_ERROR")
 
         metadata_path = doc_dir / "metadata.json"
@@ -142,7 +158,7 @@ class StorageManager:
             "status": record.status,
             "error": record.error,
             "attachment_total": len(record.attachments),
-            "attachment_downloaded": sum(1 for a in record.attachments if a.status == "DOWNLOADED"),
+            "attachment_downloaded": sum(1 for a in record.attachments if a.status == ATTACHMENT_VALIDATED),
             "updated_at": now_iso(),
             "document_dir": str(doc_dir),
             "ready_queue_dir": str(ready_dir),
@@ -153,8 +169,8 @@ class StorageManager:
         if is_ready:
             ready_dir.mkdir(parents=True, exist_ok=True)
             
-            # Find downloaded attachments
-            downloaded_attachments = [a for a in record.attachments if a.status == "DOWNLOADED" and a.saved_path]
+            # Find validated attachments. Raw downloads are not queueable.
+            downloaded_attachments = validated_attachments
             
             main_doc = None
             other_atts = []

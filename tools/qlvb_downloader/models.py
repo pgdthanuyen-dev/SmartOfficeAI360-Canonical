@@ -9,6 +9,23 @@ from pathlib import Path
 from typing import Any
 
 
+ATTACHMENT_DISCOVERED = "DISCOVERED"
+ATTACHMENT_DOWNLOAD_STARTED = "DOWNLOAD_STARTED"
+ATTACHMENT_DOWNLOADED_RAW = "DOWNLOADED_RAW"
+ATTACHMENT_VALIDATED = "VALIDATED"
+ATTACHMENT_INVALID_FILE = "INVALID_FILE"
+ATTACHMENT_DOWNLOAD_FAILED = "DOWNLOAD_FAILED"
+
+DOCUMENT_PROCESSING = "PROCESSING"
+DOCUMENT_READY = "READY"
+DOCUMENT_READY_WITH_WARNINGS = "READY_WITH_WARNINGS"
+DOCUMENT_NO_VALID_ATTACHMENT = "NO_VALID_ATTACHMENT"
+DOCUMENT_INVALID_DOCUMENT = "INVALID_DOCUMENT"
+DOCUMENT_FAILED = "FAILED"
+DOCUMENT_SESSION_EXPIRED = "SESSION_EXPIRED"
+DOCUMENT_QUEUEABLE_STATUSES = {DOCUMENT_READY, DOCUMENT_READY_WITH_WARNINGS}
+
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -40,8 +57,12 @@ class AttachmentInfo:
     href: str
     saved_path: str | None = None
     original_filename: str | None = None
-    status: str = "PENDING"
+    status: str = ATTACHMENT_DISCOVERED
     error: str | None = None
+    validation_sha256: str | None = None
+    validation_size_bytes: int | None = None
+    validation_content_type: str | None = None
+    download_source: str | None = None
 
 
 @dataclass

@@ -9,7 +9,14 @@ import pytest
 
 from tools.qlvb_downloader.config import QLVBConfig
 from tools.qlvb_downloader.downloader import QLVBDownloader
-from tools.qlvb_downloader.models import AttachmentInfo, DocumentRecord
+from tools.qlvb_downloader.models import (
+    ATTACHMENT_INVALID_FILE,
+    ATTACHMENT_VALIDATED,
+    DOCUMENT_NO_VALID_ATTACHMENT,
+    DOCUMENT_READY,
+    AttachmentInfo,
+    DocumentRecord,
+)
 
 
 class FakeResponse:
@@ -138,6 +145,14 @@ def zip_bytes(name: str = "doc.txt", content: bytes = b"ok") -> bytes:
     return bio.getvalue()
 
 
+def docx_bytes() -> bytes:
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w") as zf:
+        zf.writestr("[Content_Types].xml", "<Types></Types>")
+        zf.writestr("word/document.xml", "<w:document></w:document>")
+    return bio.getvalue()
+
+
 def test_all_file_download_response_zip_without_download_event(tmp_path):
     downloader = make_downloader(tmp_path)
     page = FakePage()
@@ -258,7 +273,10 @@ def test_download_statistics_separate_archive_and_extracted_files(tmp_path):
         "downloaded_archives": 1,
         "extracted_files": 1,
         "materialized_files": 2,
+        "invalid_files": 0,
+        "failed_files": 0,
     }
+    assert rec.attachments[0].status == ATTACHMENT_VALIDATED
 
 
 def test_valid_zip_bundle_is_extracted(tmp_path):
@@ -297,12 +315,158 @@ def test_downloaded_html_login_page_is_rejected(tmp_path):
         downloader._validate_downloaded_file(path, {})
 
 
+def test_valid_pdf_is_accepted_and_hashed(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "valid.pdf"
+    path.write_bytes(b"%PDF-1.4\n%%EOF")
+    result = downloader._validate_downloaded_file(path, {"content-type": "application/pdf"})
+    assert result["size_bytes"] == path.stat().st_size
+    assert len(result["sha256"]) == 64
+
+
+def test_valid_docx_is_accepted(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "valid.docx"
+    path.write_bytes(docx_bytes())
+    result = downloader._validate_downloaded_file(path, {})
+    assert result["filename"] == "valid.docx"
+
+
+def test_html_disguised_as_pdf_is_rejected(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "fake.pdf"
+    path.write_bytes(b"<html><body><form><input name='password'></form></body></html>")
+    with pytest.raises(RuntimeError, match="DOWNLOADED_HTML_LOGIN_PAGE|SESSION_EXPIRED"):
+        downloader._validate_downloaded_file(path, {"content-type": "application/pdf"})
+
+
+def test_html_disguised_as_zip_is_rejected(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "fake.zip"
+    path.write_bytes(b"<!doctype html><html>login password</html>")
+    with pytest.raises(RuntimeError, match="DOWNLOADED_HTML_LOGIN_PAGE|SESSION_EXPIRED"):
+        downloader._validate_downloaded_file(path, {"content-type": "application/zip"})
+
+
+def test_empty_download_is_rejected(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "empty.pdf"
+    path.write_bytes(b"")
+    with pytest.raises(RuntimeError, match="DOWNLOADED_FILE_TOO_SMALL|DOWNLOADED_FILE_EMPTY"):
+        downloader._validate_downloaded_file(path, {"content-type": "application/pdf"})
+
+
+def test_corrupt_zip_is_rejected(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "bad.zip"
+    path.write_bytes(b"PK not a real zip")
+    with pytest.raises(RuntimeError, match="DOWNLOADED_FILE_INVALID"):
+        downloader._validate_downloaded_file(path, {"content-type": "application/zip"})
+
+
 def test_docx_validation_requires_docx_structure(tmp_path):
     downloader = make_downloader(tmp_path)
     path = tmp_path / "bad.docx"
     path.write_bytes(zip_bytes("plain.txt"))
     with pytest.raises(RuntimeError, match="DOWNLOADED_FILE_INVALID"):
         downloader._validate_downloaded_file(path, {})
+
+
+def test_about_blank_download_source_is_rejected(tmp_path):
+    downloader = make_downloader(tmp_path)
+    path = tmp_path / "valid.pdf"
+    path.write_bytes(b"%PDF-1.4\n%%EOF")
+    with pytest.raises(RuntimeError, match="DOWNLOAD_SOURCE_URL_INVALID"):
+        downloader._validate_downloaded_file(path, {}, source_url="about:blank")
+
+
+def test_response_with_right_type_but_wrong_href_context_is_ignored(tmp_path):
+    downloader = make_downloader(tmp_path)
+    page = FakePage()
+    wrong_response = FakeResponse(
+        "https://qlvb.laichau.gov.vn/other.zip",
+        {"content-type": "application/zip", "content-disposition": 'attachment; filename="other.zip"'},
+        zip_bytes(),
+    )
+    locator = FakeLocator(page, response=wrong_response)
+    downloader._locator_for_href = MagicMock(return_value=locator)
+
+    with pytest.raises(AssertionError, match="unexpected request"):
+        downloader._download_by_click_or_request(page, make_record(), "https://qlvb.laichau.gov.vn/expected.zip", 1)
+
+    assert not list((tmp_path / "files").rglob("other.zip"))
+
+
+def test_downloaded_files_counts_validated_only(tmp_path):
+    downloader = make_downloader(tmp_path)
+    downloader.config.download.retry_download_times = 1
+    page = FakePage()
+    rec = make_record()
+    valid = tmp_path / "valid.pdf"
+    valid.write_bytes(b"%PDF-1.4\n%%EOF")
+    invalid = tmp_path / "invalid.pdf"
+    invalid.write_bytes(b"<html>login password</html>")
+    rec.attachments = [
+        AttachmentInfo(text="valid", href="valid"),
+        AttachmentInfo(text="invalid", href="invalid"),
+    ]
+    downloader._download_by_click_or_request = MagicMock(side_effect=[valid, invalid])
+
+    downloader._download_attachments(page, rec)
+
+    assert rec.metadata["download_stats"]["downloaded_files"] == 1
+    assert rec.metadata["download_stats"]["invalid_files"] == 1
+    assert rec.attachments[0].status == ATTACHMENT_VALIDATED
+    assert rec.attachments[1].status == ATTACHMENT_INVALID_FILE
+
+
+def test_process_direction_processed_increments_once(tmp_path):
+    downloader = make_downloader(tmp_path)
+    page = FakePage()
+    detail = FakePage()
+    detail.set_default_timeout = MagicMock()
+    page.context.new_page = MagicMock(return_value=detail)
+    rec = make_record()
+    rec.attachments = [AttachmentInfo(text="valid", href="valid", status=ATTACHMENT_VALIDATED)]
+    downloader.open_document_direction = MagicMock(return_value=page)
+    downloader._extract_records_from_current_page = MagicMock(return_value=[rec])
+    downloader._extract_headers = MagicMock(return_value=[])
+    downloader._process_record = MagicMock(side_effect=lambda _page, record, list_page=None: setattr(record, "status", DOCUMENT_READY))
+    downloader._go_next_page = MagicMock(return_value=False)
+
+    result = downloader._process_direction(page, "incoming", max_items=1)
+
+    assert result["processed"] == 1
+    assert result["downloaded_files"] == 1
+    assert result["status"] == "DONE"
+
+
+def test_direction_done_with_errors_when_no_valid_attachment(tmp_path):
+    downloader = make_downloader(tmp_path)
+    page = FakePage()
+    detail = FakePage()
+    detail.set_default_timeout = MagicMock()
+    page.context.new_page = MagicMock(return_value=detail)
+    rec = make_record()
+    rec.attachments = [AttachmentInfo(text="bad", href="bad", status=ATTACHMENT_INVALID_FILE, error="bad")]
+    downloader.open_document_direction = MagicMock(return_value=page)
+
+    def mark_no_valid(_page, record, list_page=None):
+        record.status = DOCUMENT_NO_VALID_ATTACHMENT
+        record.error = "NO_VALID_ATTACHMENT"
+
+    downloader._extract_records_from_current_page = MagicMock(return_value=[rec])
+    downloader._extract_headers = MagicMock(return_value=[])
+    downloader._process_record = MagicMock(side_effect=mark_no_valid)
+    downloader._go_next_page = MagicMock(return_value=False)
+
+    result = downloader._process_direction(page, "incoming", max_items=1)
+
+    assert result["processed"] == 1
+    assert result["downloaded_files"] == 0
+    assert result["invalid_files"] == 1
+    assert result["records_without_valid_attachment"] == 1
+    assert result["status"] == "DONE_WITH_ERRORS"
 
 
 def test_click_dom_before_javascript_evaluate(tmp_path):
