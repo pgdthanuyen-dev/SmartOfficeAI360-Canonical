@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smartofficeai360.local/schemas/g04-ai-output.schema.json",
+  "title": "SmartOfficeAI360 G04 AI Proposal Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_id",
+    "attachment_ids",
+    "model_name",
+    "model_version",
+    "prompt_version",
+    "generated_at",
+    "proposals",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attachment_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "model_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "external_proposal_id",
+          "title",
+          "description",
+          "proposed_unit_id",
+          "proposed_assignee_id",
+          "proposed_supervisor_id",
+          "proposed_due_date",
+          "expected_output",
+          "expected_output_type",
+          "priority",
+          "complexity",
+          "confidence",
+          "citations",
+          "reasoning_summary",
+          "warnings"
+        ],
+        "properties": {
+          "external_proposal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "description": {
+            "type": ["string", "null"],
+            "maxLength": 5000
+          },
+          "proposed_unit_id": {
+            "type": ["string", "null"]
+          },
+          "proposed_assignee_id": {
+            "type": ["string", "null"]
+          },
+          "proposed_supervisor_id": {
+            "type": ["string", "null"]
+          },
+          "proposed_due_date": {
+            "type": ["string", "null"],
+            "format": "date"
+          },
+          "expected_output": {
+            "type": ["string", "null"]
+          },
+          "expected_output_type": {
+            "type": ["string", "null"],
+            "enum": ["DOCUMENT", "REPORT", "MEETING", "DATA", "OTHER", null]
+          },
+          "priority": {
+            "type": ["string", "null"],
+            "enum": ["LOW", "NORMAL", "HIGH", "URGENT", null]
+          },
+          "complexity": {
+            "type": ["string", "null"],
+            "enum": ["SIMPLE", "MEDIUM", "COMPLEX", null]
+          },
+          "confidence": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "citations": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "attachment_id",
+                "page_start",
+                "page_end",
+                "excerpt",
+                "char_start",
+                "char_end"
+              ],
+              "properties": {
+                "attachment_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "page_start": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "page_end": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "excerpt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "char_start": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                },
+                "char_end": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "reasoning_summary": {
+            "type": ["string", "null"],
+            "maxLength": 1000
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
