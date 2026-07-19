@@ -1,0 +1,14 @@
+criterion,weight,score_a,score_b,better_source,evidence
+Tải và xử lý QLVB ổn định,25,21,13,A,"A có incoming/outgoing, validate file, chặn about:blank và HTML giả tệp."
+"Parser, extractor, OCR, dữ liệu",15,9,12,B,B có OCR tiếng Việt; A mạnh hơn về schema/storage.
+Kiến trúc và khả năng bảo trì,12,10,4,A,A tách module; B monolith lớn.
+"Queue, lưu trữ, phục hồi",8,7,5,A,A có manifest/hash/READY marker.
+Khả năng bổ sung AI action items,8,2,6,B,B đã có prompt và task fields.
+Khả năng xây workflow duyệt nhiệm vụ,7,2,4,B,B có dashboard/routing/manual handoff.
+Tích hợp Planner KPI,10,8,3,A,A có idempotency/polling/retry/backoff.
+Độ ổn định và xử lý lỗi,7,6,4,A,A guard tốt hơn.
+Test và khả năng xác minh,4,4,1,A,A có 72 test subset pass; B có 1 fail.
+Bảo mật và vận hành production,4,3,2,A,A có spec/queue separation; B có eval(data).
+
+TOTAL,100,72,54,A,
+UPGRADE_FIT,,81,61,A,Khả năng đạt mục tiêu mới với khối lượng sửa và rủi ro thấp hơn.
