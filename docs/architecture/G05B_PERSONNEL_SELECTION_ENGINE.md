@@ -45,6 +45,14 @@ source unit key. No match produces `UNIT_NOT_FOUND`; multiple matches produce
 LEAD_EXECUTOR, CO_EXECUTOR.
 
 For every evaluated candidate the engine keeps an in-memory evaluation ledger.
+Canonical candidate identity is `(tenant_id, personnel_id, role_type)`: one
+evaluation and at most one persisted match exist for that identity in one
+operation. The engine first collects source rows, groups them by canonical
+identity, aggregates sorted unique role/domain evidence, chooses the highest
+applicable role priority and domain responsibility, and only then ranks,
+detects conflicts, applies CO_EXECUTOR limits, and persists. Duplicate source
+rows never add score more than once.
+
 With persistence enabled, valid candidate evaluations are appended as
 `PersonnelSelectionMatch` history. The ledger supports unselected availability
 diagnostics without turning them into selected personnel. It does not store
@@ -93,7 +101,9 @@ requested count, preserves deterministic order, sends excess candidates to
 alternatives, and returns no selection when requested count is zero. A partial
 selection has `CO_EXECUTOR_COUNT_SHORTFALL` and remains unresolved. A person
 already selected as LEAD_EXECUTOR is removed from the CO_EXECUTOR candidate
-list, preventing duplicate lead/co-executor selection.
+list, preventing duplicate lead/co-executor selection. Selected ids and
+alternatives are unique personnel identities; the requested count is applied
+after canonicalization.
 
 Overall confidence is the MIN of rule confidence, resolved unit confidence
 (100 after a unique resolution), and every selected role confidence. It is not
@@ -103,8 +113,15 @@ an average; an unresolved result with no selection is 0.
 
 The engine considers a substitute only when no normal eligible candidate exists.
 The primary must have an effective primary role for the resolved unit. The
-substitute must be same-tenant, ACTIVE, effective-dated, role/unit/domain
-eligible, and AVAILABLE. An eligible direct substitute has `is_substitute=true`,
+substitute must be same-tenant, ACTIVE, have exactly one effective
+`PersonnelRecord` version at the reference date, be role/unit/domain eligible,
+and be AVAILABLE. Personnel record boundaries are inclusive. No effective
+version produces `PERSONNEL_OUTSIDE_EFFECTIVE_DATE`; multiple overlapping ACTIVE
+versions produce `PERSONNEL_DIRECTORY_INCOMPLETE` and are never auto-selected.
+
+If a canonical identity is observed through both direct and substitute paths,
+the eligible direct candidate wins: it remains non-substitute, has no score cap,
+and has no `SUBSTITUTE_USED` warning. An eligible direct substitute has `is_substitute=true`,
 `SUBSTITUTE_USED`, decision at most `SELECTED_WITH_WARNING`, and score capped at
 80.
 

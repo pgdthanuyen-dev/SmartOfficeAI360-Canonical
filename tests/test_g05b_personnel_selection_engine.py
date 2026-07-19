@@ -258,3 +258,61 @@ def test_co_executor_chain_and_cycle_never_persist_an_unselected_person_as_selec
  doc=Document(tenant_id='t',source_system='fake',source_document_id='co-'+kind);DomainRepository(c).save_document(doc);q.document_id=doc.id
  PersonnelSelectionEngine(r).evaluate(q,True);rows=r.list_selection_matches_for_document(doc.id,'1')
  assert not [row for row in rows if row['personnel_id'] in people and row['decision'] in ('SELECTED','SELECTED_WITH_WARNING')]
+
+def _temporal_substitute(role=RuleRoleType.LEAD_EXECUTOR,effective_from=None,effective_to=None):
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id'],effective_from=effective_from,effective_to=effective_to);r.create_personnel(b)
+ for p in (a,b):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],role,role.value,is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE');r.add_substitution(PersonnelSubstitution('t',a.id,b.id,role,unit_id=u['id'],status=SubstitutionStatus.ACTIVE))
+ return c,r,a,b,u,PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[role],['D'],[],'2026-07-19',1 if role==RuleRoleType.CO_EXECUTOR else 0)
+
+def test_duplicate_role_and_domain_evidence_produces_one_canonical_candidate_without_self_conflict():
+ c,r,p=_engine();u=r.get_unit(p.primary_unit_id)
+ for code,priority in (('LEAD-A',1),('LEAD-B',5)):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,code,is_primary=True,priority=priority))
+ for domain,priority in (('D1',2),('D2',7)):r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,domain,ResponsibilityLevel.PRIMARY,priority=priority))
+ q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D1','D2'],[],'2026-07-19');engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0]
+ evaluations=[item for item in engine.all_evaluations if item.personnel_id==p.id and item.role_type==RuleRoleType.LEAD_EXECUTOR]
+ assert rec.selected_personnel_id==p.id and rec.decision!=PersonnelSelectionDecision.CONFLICT and len(evaluations)==1 and evaluations[0].score==100 and evaluations[0].role_priority==5 and evaluations[0].domain_priority==7 and evaluations[0].matched_role_codes==['LEAD-A','LEAD-B'] and evaluations[0].matched_domain_codes==['D1','D2']
+
+def test_co_executor_identity_dedupe_applies_before_count_alternatives_and_persistence():
+ c,r,p=_engine();u=r.get_unit(p.primary_unit_id);qperson=PersonnelRecord('t','Q',1,'Q',primary_unit_id=u['id']);rperson=PersonnelRecord('t','R',1,'R',primary_unit_id=u['id']);r.create_personnel(qperson);r.create_personnel(rperson)
+ for code in ('CO-A','CO-B'):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.CO_EXECUTOR,code,is_primary=True))
+ for person,code in ((qperson,'CO-Q'),(rperson,'CO-R')):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.CO_EXECUTOR,code,is_primary=True))
+ for person in (p,qperson,rperson):r.add_domain_assignment(PersonnelDomainAssignment('t',person.id,'D',ResponsibilityLevel.PRIMARY))
+ doc=Document(tenant_id='t',source_system='fake',source_document_id='identity');DomainRepository(c).save_document(doc);q=PersonnelSelectionRequest('t',doc.id,'1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',2);engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q,True).role_recommendations[0];rows=r.list_selection_matches_for_document(doc.id,'1')
+ assert rec.selected_personnel_ids==[p.id,qperson.id] and len(rec.selected_personnel_ids)==len(set(rec.selected_personnel_ids)) and [item.personnel_id for item in rec.alternative_candidates]==[rperson.id]
+ assert len([item for item in engine.all_evaluations if item.role_type==RuleRoleType.CO_EXECUTOR and item.personnel_id==p.id])==1 and len([row for row in rows if row['personnel_id']==p.id and row['role_type']=='CO_EXECUTOR'])==1
+
+def test_canonicalization_prefers_direct_candidate_and_is_independent_of_source_order():
+ c,r,p=_engine();e=PersonnelSelectionEngine(r);direct=PersonnelCandidateEvaluation(p.id,'P','P','u',RuleRoleType.LEAD_EXECUTOR,100,PersonnelSelectionDecision.SELECTED,False,['D'],['DIRECT'],[],'direct');substitute=PersonnelCandidateEvaluation(p.id,'P','P','u',RuleRoleType.LEAD_EXECUTOR,80,PersonnelSelectionDecision.SELECTED_WITH_WARNING,True,['D'],['SUB'],['SUBSTITUTE_USED'],'substitute')
+ first=e._canonicalize_evaluations([substitute,direct]);second=e._canonicalize_evaluations([direct,substitute])
+ assert first==second and len(first)==1 and not first[0].is_substitute and first[0].score==100 and first[0].warnings==[]
+
+def test_multiple_substitution_rows_for_one_person_yield_one_substitute_candidate():
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);cprimary=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);r.create_personnel(cprimary);r.create_personnel(b)
+ for person in (a,cprimary,b):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',person.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE');_availability(c,cprimary,'LEAVE');_sub(c,a,b,u['id']);_sub(c,cprimary,b,u['id'])
+ q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19');engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0]
+ evaluations=[item for item in engine.all_evaluations if item.personnel_id==b.id and item.role_type==RuleRoleType.LEAD_EXECUTOR]
+ assert rec.selected_personnel_id==b.id and len(evaluations)==1 and evaluations[0].is_substitute and evaluations[0].score==80 and evaluations[0].warnings==['SUBSTITUTE_USED']
+
+@pytest.mark.parametrize('effective_from,effective_to,selected',[("2026-07-18",None,True),("2026-07-19",None,True),("2026-07-20",None,False),(None,"2026-07-20",True),(None,"2026-07-19",True),(None,"2026-07-18",False),(None,None,True)])
+def test_substitute_personnel_effective_date_boundaries_are_inclusive(effective_from,effective_to,selected):
+ c,r,a,b,u,q=_temporal_substitute(effective_from=effective_from,effective_to=effective_to);engine=PersonnelSelectionEngine(r);out=engine.evaluate(q);rec=out.role_recommendations[0]
+ assert (rec.selected_personnel_id==b.id)==selected
+ if not selected:
+  diagnostics=[item for item in engine.all_evaluations if item.personnel_id==b.id];assert diagnostics and diagnostics[0].warnings==['PERSONNEL_OUTSIDE_EFFECTIVE_DATE'] and 'SUBSTITUTE_USED' not in diagnostics[0].warnings and RuleRoleType.LEAD_EXECUTOR in out.unresolved_roles
+
+def test_substitute_version_gap_and_overlap_are_not_auto_selected():
+ c,r,a,b,u,q=_temporal_substitute(effective_to='2026-07-18');future=PersonnelRecord('t','B',2,'B future',primary_unit_id=u['id'],effective_from='2026-07-20');r.create_personnel(future);out=PersonnelSelectionEngine(r).evaluate(q);assert out.role_recommendations[0].selected_personnel_id is None
+ c,r,a,b,u,q=_temporal_substitute();overlap=PersonnelRecord('t','B',2,'B overlap',primary_unit_id=u['id']);r._insert_personnel(overlap);c.commit();engine=PersonnelSelectionEngine(r);out=engine.evaluate(q);diagnostics=[item for item in engine.all_evaluations if item.personnel_id==b.id]
+ assert out.role_recommendations[0].selected_personnel_id is None and diagnostics and diagnostics[0].warnings==['PERSONNEL_DIRECTORY_INCOMPLETE']
+
+@pytest.mark.parametrize('role',[RuleRoleType.LEADER,RuleRoleType.MONITOR,RuleRoleType.LEAD_EXECUTOR,RuleRoleType.CO_EXECUTOR])
+def test_all_roles_reject_future_dated_substitute_personnel(role):
+ c,r,a,b,u,q=_temporal_substitute(role,effective_from='2026-07-20');out=PersonnelSelectionEngine(r).evaluate(q);rec=out.role_recommendations[0]
+ assert b.id not in rec.selected_personnel_ids and rec.selected_personnel_id is None and RuleRoleType(role) in out.unresolved_roles
+
+def test_temporally_ineligible_substitute_is_not_persisted_as_selected():
+ c,r,a,b,u,q=_temporal_substitute(effective_from='2026-07-20');doc=Document(tenant_id='t',source_system='fake',source_document_id='future-sub');DomainRepository(c).save_document(doc);q.document_id=doc.id
+ PersonnelSelectionEngine(r).evaluate(q,True);rows=r.list_selection_matches_for_document(doc.id,'1')
+ assert not [row for row in rows if row['personnel_id']==b.id and row['decision'] in ('SELECTED','SELECTED_WITH_WARNING')] and [row for row in rows if row['personnel_id']==b.id and row['warnings_json']=='["PERSONNEL_OUTSIDE_EFFECTIVE_DATE"]']
