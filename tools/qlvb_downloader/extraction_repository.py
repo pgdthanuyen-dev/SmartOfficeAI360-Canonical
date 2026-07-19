@@ -5,6 +5,8 @@ from typing import Any
 
 from .domain_models import utc_now_iso
 from .extraction_models import (
+    MAX_EXTRACTION_ERROR_CHARS,
+    ExtractionAttemptStatus,
     ExtractionResult,
     ExtractionStatus,
     ExtractedPage,
@@ -15,6 +17,7 @@ from .extraction_models import (
 
 
 MIGRATION_VERSION = "g03_extraction_schema_1"
+CACHE_SAFETY_MIGRATION_VERSION = "g03_extraction_cache_safety_1"
 
 
 _CREATE_TABLES_SQL = [
@@ -66,6 +69,28 @@ _CREATE_TABLES_SQL = [
         applied_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS extraction_attempts (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        attachment_id TEXT NOT NULL,
+        source_file_sha256 TEXT NOT NULL,
+        extractor_name TEXT NOT NULL,
+        extractor_version TEXT NOT NULL,
+        ocr_version TEXT NOT NULL,
+        force_requested INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        result_id TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(document_id) REFERENCES documents(doc_id) ON DELETE CASCADE,
+        FOREIGN KEY(attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
+        FOREIGN KEY(result_id) REFERENCES extraction_results(id) ON DELETE SET NULL
+    );
+    """,
 ]
 
 
@@ -74,6 +99,9 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_extraction_results_document_id ON extraction_results(document_id);",
     "CREATE INDEX IF NOT EXISTS idx_extraction_results_status ON extraction_results(status);",
     "CREATE INDEX IF NOT EXISTS idx_extracted_pages_result_id ON extracted_pages(extraction_result_id);",
+    "CREATE INDEX IF NOT EXISTS idx_extraction_attempts_attachment_id ON extraction_attempts(attachment_id);",
+    "CREATE INDEX IF NOT EXISTS idx_extraction_attempts_status ON extraction_attempts(status);",
+    "CREATE INDEX IF NOT EXISTS idx_extraction_attempts_created_at ON extraction_attempts(created_at);",
 ]
 
 
@@ -86,6 +114,10 @@ def init_extraction_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (MIGRATION_VERSION, utc_now_iso()),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        (CACHE_SAFETY_MIGRATION_VERSION, utc_now_iso()),
     )
     conn.commit()
 
@@ -122,7 +154,7 @@ class ExtractionRepository:
               AND extractor_name = ?
               AND extractor_version = ?
               AND ocr_version = ?
-              AND status IN (?, ?)
+              AND status IN (?, ?, ?)
             ORDER BY completed_at DESC, started_at DESC
             LIMIT 1
             """,
@@ -134,9 +166,27 @@ class ExtractionRepository:
                 ocr_version,
                 ExtractionStatus.SUCCEEDED.value,
                 ExtractionStatus.SUCCEEDED_WITH_WARNINGS.value,
+                ExtractionStatus.NO_TEXT.value,
             ),
         ).fetchone()
         return dict(row) if row is not None else None
+
+    def get_cached_result(
+        self,
+        *,
+        attachment_id: str,
+        source_file_sha256: str,
+        extractor_name: str,
+        extractor_version: str,
+        ocr_version: str,
+    ) -> dict[str, Any] | None:
+        return self.find_cached_success(
+            attachment_id=attachment_id,
+            source_file_sha256=source_file_sha256,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            ocr_version=ocr_version,
+        )
 
     def list_pages(self, extraction_result_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -146,6 +196,15 @@ class ExtractionRepository:
         return [dict(row) for row in rows]
 
     def save_result_with_pages(self, result: ExtractionResult, pages: list[ExtractedPage]) -> None:
+        self.save_success_result_with_pages(result, pages)
+
+    def save_success_result_with_pages(
+        self,
+        result: ExtractionResult,
+        pages: list[ExtractedPage],
+        *,
+        force_requested: bool = False,
+    ) -> None:
         validate_extraction_result(result)
         for page in pages:
             validate_extracted_page(page)
@@ -155,17 +214,35 @@ class ExtractionRepository:
                 self._insert_result(result)
                 for page in pages:
                     self._insert_page(page)
+                self._insert_attempt(
+                    result,
+                    ExtractionAttemptStatus.SUCCEEDED,
+                    force_requested=force_requested,
+                    result_id=result.id,
+                )
         except Exception:
             self.conn.rollback()
             raise
 
-    def save_failed_result(self, result: ExtractionResult) -> None:
+    def save_failed_result(self, result: ExtractionResult, *, force_requested: bool = False) -> None:
+        self.record_failed_attempt(result, force_requested=force_requested)
+
+    def record_failed_attempt(self, result: ExtractionResult, *, force_requested: bool = False) -> None:
         result.status = ExtractionStatus.FAILED
         result.page_count = 0
         validate_extraction_result(result)
         with self.conn:
-            self._delete_existing_cache(result)
-            self._insert_result(result)
+            self._insert_attempt(result, ExtractionAttemptStatus.FAILED, force_requested=force_requested)
+
+    def list_attempts(self, attachment_id: str | None = None) -> list[dict[str, Any]]:
+        if attachment_id is None:
+            rows = self.conn.execute("SELECT * FROM extraction_attempts ORDER BY created_at, id").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM extraction_attempts WHERE attachment_id = ? ORDER BY created_at, id",
+                (attachment_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def _delete_existing_cache(self, result: ExtractionResult) -> None:
         self.conn.execute(
@@ -240,3 +317,46 @@ class ExtractionRepository:
                 page.created_at,
             ),
         )
+
+    def _insert_attempt(
+        self,
+        result: ExtractionResult,
+        status: ExtractionAttemptStatus,
+        *,
+        force_requested: bool,
+        result_id: str | None = None,
+    ) -> None:
+        from .domain_models import new_id
+
+        self.conn.execute(
+            """
+            INSERT INTO extraction_attempts (
+                id, document_id, attachment_id, source_file_sha256, extractor_name,
+                extractor_version, ocr_version, force_requested, status, result_id,
+                error_code, error_message, started_at, completed_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id(),
+                result.document_id,
+                result.attachment_id,
+                result.source_file_sha256,
+                result.extractor_name,
+                result.extractor_version,
+                result.ocr_version,
+                1 if force_requested else 0,
+                status.value,
+                result_id,
+                result.error_code,
+                _truncate_error(result.error_message),
+                result.started_at,
+                result.completed_at,
+                utc_now_iso(),
+            ),
+        )
+
+
+def _truncate_error(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value[:MAX_EXTRACTION_ERROR_CHARS]

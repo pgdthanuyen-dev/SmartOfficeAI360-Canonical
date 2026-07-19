@@ -68,7 +68,7 @@ class ExtractionService:
                 return self._failed(document_id, attachment_id, source_hash, ocr_version, "HASH_MISMATCH", "Attachment SHA-256 does not match file")
 
             if not force:
-                cached = self.repository.find_cached_success(
+                cached = self.repository.get_cached_result(
                     attachment_id=attachment_id,
                     source_file_sha256=source_hash,
                     extractor_name=EXTRACTOR_NAME,
@@ -113,7 +113,7 @@ class ExtractionService:
             for page in pages:
                 page.extraction_result_id = started_result.id
                 validate_extracted_page(page)
-            self.repository.save_result_with_pages(started_result, pages)
+            self.repository.save_success_result_with_pages(started_result, pages, force_requested=force)
             return started_result
         except Exception as exc:
             failed = started_result or ExtractionResult(
@@ -131,9 +131,9 @@ class ExtractionService:
             failed.error_message = str(exc)
             failed.page_count = 0
             try:
-                self.repository.save_failed_result(failed)
-            except Exception:
-                pass
+                self.repository.record_failed_attempt(failed, force_requested=force)
+            except Exception as attempt_exc:
+                failed.warnings = f"ATTEMPT_RECORD_FAILED:{attempt_exc}"
             return failed
 
     def _extract_pages(
@@ -177,9 +177,9 @@ class ExtractionService:
             ocr_version=ocr_version,
         )
         try:
-            self.repository.save_failed_result(result)
-        except Exception:
-            pass
+            self.repository.record_failed_attempt(result, force_requested=False)
+        except Exception as attempt_exc:
+            result.warnings = f"ATTEMPT_RECORD_FAILED:{attempt_exc}"
         return result
 
     def _unsupported(
@@ -204,7 +204,7 @@ class ExtractionService:
             error_message=error_message,
             ocr_version=ocr_version,
         )
-        self.repository.save_result_with_pages(result, [])
+        self.repository.save_success_result_with_pages(result, [], force_requested=False)
         return result
 
 

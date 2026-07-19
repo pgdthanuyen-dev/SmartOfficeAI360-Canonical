@@ -33,6 +33,11 @@ class ExtractionStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ExtractionAttemptStatus(StrEnum):
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
 class DetectedFileType(StrEnum):
     PDF = "PDF"
     DOCX = "DOCX"
