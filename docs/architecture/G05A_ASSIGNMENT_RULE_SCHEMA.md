@@ -2,9 +2,9 @@
 
 ## Goal
 
-G05A adds a library-only assignment rule domain for mapping canonical documents and proposed action items to rule-based unit and role suggestions. It builds schema, models, validation, additive SQLite persistence, and compatibility tests.
+G05A adds a library-only assignment rule domain for mapping canonical documents and proposed action items to rule-based unit and role suggestions. It builds schema, models, validation, additive SQLite persistence, deterministic scoring, and compatibility tests.
 
-G05A does not choose specific people, call AI, call SharePoint, create Planner payloads, build UI, access live QLVB, or implement the final scoring engine. Scoring is reserved for G05A engine work in the next command.
+G05A does not choose specific people, call AI, call SharePoint, create Planner payloads, build UI, access live QLVB, or create assignment drafts.
 
 Schema version: `ASSIGNMENT_RULE_SCHEMA_VERSION = "1.0.0"`.
 
@@ -40,7 +40,7 @@ Supported match modes are `EXACT`, `CONTAINS`, `TOKEN`, `PREFIX`, and `REGEX_SAF
 
 ### AssignmentRuleExclusion
 
-A negative signal attached to a rule. Hard exclusions remove a rule from future results. Non-hard exclusions can later contribute a penalty. G05A stores the data and validates non-negative penalty but does not implement full scoring yet.
+A negative signal attached to a rule. Hard exclusions remove a rule from engine recommendations. Non-hard exclusions contribute a bounded score penalty. G05A stores the data and validates non-negative penalty.
 
 ### AssignmentRuleUnit
 
@@ -125,7 +125,7 @@ Rules, units, and roles can carry effective date ranges. `effective_to` cannot b
 
 ## Conditions And Exclusions
 
-Conditions and exclusions store normalized values for deterministic matching. Required conditions are persisted but the full required-signal scoring algorithm is not implemented in G05A schema work.
+Conditions and exclusions store normalized values for deterministic matching. The G05A engine evaluates required conditions, soft penalties, hard exclusions, confidence thresholds, ranking, and conflict handling.
 
 Duplicate conditions inside the same rule are rejected by type, normalized value, and match mode. Duplicate lead units are rejected. Multiple required roles of the same type are rejected to avoid ambiguous mandatory routing.
 
@@ -145,6 +145,10 @@ Specific person resolution belongs to G05B.
 Match history is append-only. `append_match()` inserts a new row and never updates old history. `supersede_rule()` changes the rule status without deleting matches. Rule rows referenced by match history are protected by foreign keys.
 
 Scores are bounded `0..100`. `input_fingerprint` must be SHA-256. Explanations and warnings JSON are size-limited.
+
+## Engine Link
+
+The deterministic runtime evaluator is documented in `docs/architecture/G05A_ASSIGNMENT_RULE_ENGINE.md`. It uses `AssignmentRuleRepository` as a library-only entrypoint and maps `DocumentAssignmentSignals` to `AssignmentRuleEvaluation`, `AssignmentRuleCandidate`, and `AssignmentRecommendation`.
 
 ## Migration
 
@@ -182,10 +186,8 @@ G05A is local SQLite persistence only. It does not:
 - store full extracted document text in match history;
 - create build artifacts or runtime data.
 
-## Not Implemented In G05A Schema
+## Not Implemented In G05A
 
-- scoring engine;
-- final rule matching algorithm;
 - person-specific assignment;
 - Planner payload generation;
 - SharePoint upload;
