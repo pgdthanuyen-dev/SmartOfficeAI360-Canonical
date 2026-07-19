@@ -2,7 +2,7 @@
 
 ## Goal and boundary
 
-G05B provides a library-only, tenant-safe SQLite directory for organization units and personnel records. It is the persistence boundary for future personnel proposal work, not a person-selection engine. G05A remains responsible for deterministic unit and role recommendations; G05B consumes its source unit keys and `RuleRoleType` values without modifying the G05A engine.
+G05B provides a library-only, tenant-safe SQLite directory for organization units and personnel records. It is the persistence boundary for the deterministic proposal engine documented in [G05B Personnel Selection Engine](G05B_PERSONNEL_SELECTION_ENGINE.md), not an assignment or approval workflow. G05A remains responsible for deterministic unit and role recommendations; G05B consumes its source unit keys and `RuleRoleType` values without modifying the G05A engine.
 
 Schema version: `1.0.0`. Migration: `g05b_personnel_unit_directory_schema_1`. Runtime entrypoint: `LIBRARY_ONLY` through `PersonnelDirectoryRepository`.
 
@@ -31,9 +31,9 @@ erDiagram
 
 `PersonnelDomainAssignment` records structured domain/subdomain responsibility level, primary flag, priority, dates, and provenance. `PersonnelRoleAssignment` reuses G05A `RuleRoleType` exactly: LEADER, MONITOR, LEAD_EXECUTOR, CO_EXECUTOR. Both child records require same-tenant parent records, reject duplicate overlapping assignments, and use deterministic effective-date filters.
 
-`PersonnelSubstitution` is a directional, statused, temporal relation. Self references and cycles are rejected. It does not make a substitute primary; a future engine must lower confidence or warn. `PersonnelAvailability` stores only bounded administrative reasons and temporal availability; missing blocking data defaults to AVAILABLE.
+`PersonnelSubstitution` is a directional, statused, temporal relation. Self references and cycles are rejected. The selection engine additionally protects itself from legacy/bad chain or cycle rows, uses only one direct substitute, and caps direct-substitute score at 80. `PersonnelAvailability` stores only bounded administrative reasons and temporal availability; missing blocking data defaults to AVAILABLE. Candidate collection uses effective-date lookups for ACTIVE unit/person records, roles, domains, availability, and substitutions.
 
-`PersonnelSelectionMatch` is append-only audit history with document/revision, optional G05A match, role, unit/person references, bounded score/explanation/warnings, SHA-256 input fingerprint, and time. It stores no document text, chain-of-thought, credentials, or external IDs.
+`PersonnelSelectionMatch` is append-only audit history with document/revision, optional G05A match, role, unit/person references, bounded score/explanation/warnings, SHA-256 input fingerprint, and time. The selection engine batch-validates and transactionally appends this history; it never updates or deletes earlier evaluations. It stores no document text, chain-of-thought, credentials, or external IDs.
 
 ## Validation, migration, and repository
 
@@ -41,7 +41,7 @@ All inputs use NFC/casefold/whitespace-collapse normalization while preserving V
 
 The additive/idempotent migration creates seven tables: `organization_units`, `personnel_records`, `personnel_domain_assignments`, `personnel_role_assignments`, `personnel_substitutions`, `personnel_availability`, and `personnel_selection_matches`, with indexes for tenant/status/source/date and lookup paths. It initializes after G02/G05A schema setup and neither drops nor deletes G01-G05A data.
 
-The repository offers CRUD-style creation/read/list/update/supersede for units and personnel, hierarchy reads, assignment and availability management, active date filters, substitution lookup, and insert-only selection match history. Unit/person updates require expected `row_version` and reject stale writes. Bundle creation uses one transaction and rolls back the parent when a child fails.
+The repository offers CRUD-style creation/read/list/update/supersede for units and personnel, hierarchy reads, assignment and availability management, active date filters, substitution lookup, and insert-only selection match history. The directory is the source for selection-engine candidate collection, not a task-assignment authority. Unit/person updates require expected `row_version` and reject stale writes. Bundle creation and batch selection-history append use transactions and roll back their current operation when a child or match fails.
 
 ## G02 and Excel compatibility
 

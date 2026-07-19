@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import date
 from typing import Iterable
@@ -20,9 +21,12 @@ from .personnel_directory_models import (
     PersonnelSelectionMatch,
     PersonnelSubstitution,
 )
+from .personnel_directory_models import MAX_SELECTION_WARNING_COUNT, MAX_SELECTION_WARNING_LENGTH
 
 
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
+_WARNING_CODES = {'UNIT_NOT_FOUND','UNIT_VERSION_CONFLICT','NO_ELIGIBLE_PERSON','PERSONNEL_STATUS_INELIGIBLE','PERSONNEL_OUTSIDE_EFFECTIVE_DATE','ROLE_NOT_MATCHED','DOMAIN_NOT_MATCHED','AVAILABILITY_BLOCKED','AVAILABILITY_CONFLICT','SUBSTITUTE_USED','SUBSTITUTION_CHAIN_UNSUPPORTED','SUBSTITUTION_CYCLE_DETECTED','MULTIPLE_TOP_PERSONNEL','REQUIRED_ROLE_UNRESOLVED','PERSONNEL_DIRECTORY_INCOMPLETE','PERSONNEL_CONFLICT','CO_EXECUTOR_COUNT_SHORTFALL'}
+_SENSITIVE = re.compile(r'(?i)(authorization\s*:|bearer\s+|access_token|cookie=|https?://|[a-z]:\\\\|\\\\\\\\|planner_user_id|select\s+\*|traceback)')
 
 
 class PersonnelDirectoryValidationError(ValueError):
@@ -104,11 +108,14 @@ def validate_selection_match(match: PersonnelSelectionMatch) -> None:
     _required(match.tenant_id, "selection.tenant_id")
     _required(match.document_id, "selection.document_id")
     _required(match.document_revision, "selection.document_revision")
-    if not 0 <= match.score <= 100:
+    if not isinstance(match.score, (int, float)) or not math.isfinite(match.score) or not 0 <= match.score <= 100:
         raise PersonnelDirectoryValidationError("selection.score must be between 0 and 100")
+    if match.role_type not in set(RuleRoleType) or match.decision not in set(__import__('tools.qlvb_downloader.personnel_directory_models', fromlist=['PersonnelSelectionDecision']).PersonnelSelectionDecision):
+        raise PersonnelDirectoryValidationError("selection role or decision is invalid")
     if not _SHA256_RE.fullmatch(match.input_fingerprint or ""):
         raise PersonnelDirectoryValidationError("selection.input_fingerprint must be SHA-256")
     _optional_text(match.explanation, "selection.explanation", MAX_SELECTION_EXPLANATION_CHARS)
+    if match.explanation and _SENSITIVE.search(match.explanation): raise PersonnelDirectoryValidationError("selection.explanation contains disallowed content")
     if len(match.warnings_json) > MAX_SELECTION_WARNINGS_CHARS:
         raise PersonnelDirectoryValidationError("selection.warnings_json is too long")
     try:
@@ -117,6 +124,8 @@ def validate_selection_match(match: PersonnelSelectionMatch) -> None:
         raise PersonnelDirectoryValidationError("selection.warnings_json must be JSON") from exc
     if not isinstance(warnings, list):
         raise PersonnelDirectoryValidationError("selection.warnings_json must be a JSON array")
+    if len(warnings) > MAX_SELECTION_WARNING_COUNT or any(not isinstance(w,str) or len(w)>MAX_SELECTION_WARNING_LENGTH or w not in _WARNING_CODES for w in warnings):
+        raise PersonnelDirectoryValidationError("selection warnings are invalid")
 
 
 def date_ranges_overlap(

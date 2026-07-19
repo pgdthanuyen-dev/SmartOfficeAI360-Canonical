@@ -282,9 +282,24 @@ class PersonnelDirectoryRepository:
         row = self._one("SELECT * FROM personnel_availability WHERE personnel_id=? AND unavailable_from<=? AND (unavailable_to IS NULL OR unavailable_to>=?) ORDER BY unavailable_from DESC,id LIMIT 1", (personnel_id, as_of_date, as_of_date))
         return row or {"personnel_id": personnel_id, "availability_status": AvailabilityStatus.AVAILABLE.value}
 
-    def append_selection_match(self, match: PersonnelSelectionMatch) -> str:
+    def append_selection_match(self, match: PersonnelSelectionMatch, *, commit: bool = True) -> str:
         validate_selection_match(match); self._assert_document_tenant(match.document_id, match.tenant_id); self._assert_tenant_row("organization_units", match.unit_id, match.tenant_id, "selection unit"); self._assert_tenant_row("personnel_records", match.personnel_id, match.tenant_id, "selection personnel")
-        self.conn.execute("INSERT INTO personnel_selection_matches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (match.id, match.tenant_id, match.document_id, match.document_revision, match.assignment_rule_match_id, match.role_type.value, match.unit_id, match.personnel_id, match.score, match.decision.value, match.explanation, match.warnings_json, match.input_fingerprint, match.created_at)); self.conn.commit(); return match.id
+        self.conn.execute("INSERT INTO personnel_selection_matches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (match.id, match.tenant_id, match.document_id, match.document_revision, match.assignment_rule_match_id, match.role_type.value, match.unit_id, match.personnel_id, match.score, match.decision.value, match.explanation, match.warnings_json, match.input_fingerprint, match.created_at))
+        if commit: self.conn.commit()
+        return match.id
+
+    def append_selection_matches(self, matches: list[PersonnelSelectionMatch]) -> list[str]:
+        from .personnel_directory_validation import validate_selection_match
+        deduped = []
+        seen = set()
+        for match in matches:
+            validate_selection_match(match)
+            key = (match.personnel_id, match.role_type.value)
+            if key not in seen:
+                seen.add(key); deduped.append(match)
+        with self.conn:
+            for match in deduped: self.append_selection_match(match, commit=False)
+        return [match.id for match in deduped]
 
     def list_selection_matches_for_document(self, document_id: str, document_revision: str) -> list[dict[str, Any]]:
         return self._many("SELECT * FROM personnel_selection_matches WHERE document_id=? AND document_revision=? ORDER BY created_at,id", (document_id, document_revision))
