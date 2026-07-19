@@ -6,13 +6,22 @@ import sqlite3
 
 import pytest
 
-from tools.qlvb_downloader.ai_proposal_models import AI_PROPOSAL_SCHEMA_VERSION
+from tools.qlvb_downloader.ai_proposal_models import (
+    AI_PROPOSAL_SCHEMA_VERSION,
+    IDEMPOTENCY_CONFLICT_ERROR_CODE,
+    MAX_ERROR_LENGTH,
+    MAX_WARNING_LENGTH,
+    MAX_WARNINGS_PER_ENVELOPE,
+    MAX_WARNINGS_PER_PROPOSAL,
+    now_for_ai_proposal,
+)
 from tools.qlvb_downloader.ai_proposal_repository import (
     AI_PROPOSAL_MIGRATION_VERSION,
     AiProposalRepository,
     init_ai_proposal_schema,
 )
 from tools.qlvb_downloader.ai_proposal_service import (
+    AiProposalIdempotencyConflict,
     AiProposalService,
     FakeAiProposalProvider,
     build_empty_ai_proposal_envelope,
@@ -44,6 +53,45 @@ PAGE_2 = "Phoi hop don vi B cung cap phu luc va bang bieu."
 class FailingCitationRepository(AiProposalRepository):
     def _insert_citation(self, citation):  # noqa: ANN001
         raise sqlite3.IntegrityError("simulated citation insert failure")
+
+
+class LongFailingCitationRepository(AiProposalRepository):
+    def _insert_citation(self, citation):  # noqa: ANN001
+        raise sqlite3.IntegrityError("x" * (MAX_ERROR_LENGTH + 50))
+
+
+class RacingBatchRepository(AiProposalRepository):
+    winning_hash: str | None = None
+
+    def create_batch(self, **kwargs):  # noqa: ANN003
+        raw_hash = self.winning_hash or kwargs["raw_response_sha256"]
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO ai_proposal_batches (
+                    id, document_id, idempotency_key, schema_version, model_name,
+                    model_version, prompt_version, generated_at, raw_response_sha256,
+                    status, received_count, accepted_count, rejected_count, duplicate_count,
+                    warning_count, created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
+                """,
+                (
+                    "race-winning-batch",
+                    kwargs["document_id"],
+                    kwargs["idempotency_key"],
+                    kwargs["schema_version"],
+                    kwargs["model_name"],
+                    kwargs["model_version"],
+                    kwargs["prompt_version"],
+                    kwargs["generated_at"],
+                    raw_hash,
+                    "COMPLETED",
+                    kwargs["received_count"],
+                    now_for_ai_proposal(),
+                    now_for_ai_proposal(),
+                ),
+            )
+        raise sqlite3.IntegrityError("simulated idempotency race")
 
 
 def _connect() -> sqlite3.Connection:
@@ -361,9 +409,88 @@ def test_idempotency_second_run_does_not_duplicate():
     try:
         first = _ingest(ai_repo, _envelope(), key="same-key")
         second = _ingest(ai_repo, _envelope(), key="same-key")
+        batch_count = conn.execute("SELECT COUNT(*) AS n FROM ai_proposal_batches").fetchone()["n"]
         count = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
         assert first.batch_id == second.batch_id
+        assert batch_count == 1
         assert count == 1
+    finally:
+        conn.close()
+
+
+def test_same_key_different_body_returns_conflict():
+    conn, _, _, ai_repo = _seed()
+    try:
+        first = _ingest(ai_repo, _envelope(), key="conflict-key")
+        changed = _proposal(external_proposal_id="p-2", title="Viec khac")
+        second = _ingest(ai_repo, _envelope(changed), key="conflict-key")
+        assert first.batch_id
+        assert second.batch_id == ""
+        assert second.error_code == IDEMPOTENCY_CONFLICT_ERROR_CODE
+        assert second.idempotency_key == "conflict-key"
+        assert second.existing_batch_id == first.batch_id
+        assert IDEMPOTENCY_CONFLICT_ERROR_CODE in second.errors[0]
+    finally:
+        conn.close()
+
+
+def test_same_key_different_body_does_not_change_existing_batch():
+    conn, _, _, ai_repo = _seed()
+    try:
+        original = _envelope()
+        first = _ingest(ai_repo, original, key="conflict-preserve")
+        changed = _envelope(_proposal(external_proposal_id="p-2", title="Viec khac"))
+        _ingest(ai_repo, changed, key="conflict-preserve")
+        row = conn.execute(
+            "SELECT raw_response_sha256 FROM ai_proposal_batches WHERE id = ?",
+            (first.batch_id,),
+        ).fetchone()
+        assert row["raw_response_sha256"] == compute_stable_hash(original)
+    finally:
+        conn.close()
+
+
+def test_same_key_different_body_does_not_create_action_item_or_citation():
+    conn, _, _, ai_repo = _seed()
+    try:
+        _ingest(ai_repo, _envelope(), key="conflict-no-write")
+        item_before = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
+        citation_before = conn.execute("SELECT COUNT(*) AS n FROM source_citations").fetchone()["n"]
+        changed = _envelope(_proposal(external_proposal_id="p-2", title="Viec khac"))
+        _ingest(ai_repo, changed, key="conflict-no-write")
+        item_after = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
+        citation_after = conn.execute("SELECT COUNT(*) AS n FROM source_citations").fetchone()["n"]
+        assert item_after == item_before
+        assert citation_after == citation_before
+    finally:
+        conn.close()
+
+
+def test_idempotency_race_same_body_returns_winning_batch():
+    conn, _, _, ai_repo = _seed(RacingBatchRepository)
+    try:
+        result = _ingest(ai_repo, _envelope(), key="race-same")
+        batch_count = conn.execute("SELECT COUNT(*) AS n FROM ai_proposal_batches").fetchone()["n"]
+        item_count = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
+        assert result.batch_id == "race-winning-batch"
+        assert result.error_code is None
+        assert batch_count == 1
+        assert item_count == 0
+    finally:
+        conn.close()
+
+
+def test_idempotency_race_different_body_returns_conflict():
+    conn, _, _, ai_repo = _seed(RacingBatchRepository)
+    try:
+        ai_repo.winning_hash = "b" * 64
+        result = _ingest(ai_repo, _envelope(), key="race-different")
+        batch_count = conn.execute("SELECT COUNT(*) AS n FROM ai_proposal_batches").fetchone()["n"]
+        item_count = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
+        assert result.error_code == IDEMPOTENCY_CONFLICT_ERROR_CODE
+        assert result.existing_batch_id == "race-winning-batch"
+        assert batch_count == 1
+        assert item_count == 0
     finally:
         conn.close()
 
@@ -375,6 +502,18 @@ def test_citation_insert_failure_rolls_back_action_item():
         count = conn.execute("SELECT COUNT(*) AS n FROM action_items").fetchone()["n"]
         assert result.rejected_count == 1
         assert count == 0
+    finally:
+        conn.close()
+
+
+def test_persisted_internal_error_is_bounded():
+    conn, _, _, ai_repo = _seed(LongFailingCitationRepository)
+    try:
+        result = _ingest(ai_repo, _envelope(), key="bounded-error")
+        row = conn.execute("SELECT error_message FROM ai_proposal_items").fetchone()
+        assert result.rejected_count == 1
+        assert len(result.errors[0]) <= MAX_ERROR_LENGTH
+        assert len(row["error_message"]) <= MAX_ERROR_LENGTH
     finally:
         conn.close()
 
@@ -401,6 +540,38 @@ def test_raw_response_hash_is_stable():
         assert row["raw_response_sha256"] == compute_stable_hash(payload)
     finally:
         conn.close()
+
+
+def test_warning_at_limit_is_accepted():
+    proposal = _proposal(warnings=["w" * MAX_WARNING_LENGTH])
+    envelope = _envelope(proposal, warnings=["e" * MAX_WARNING_LENGTH])
+    parsed = parse_ai_proposal_json(envelope)
+    assert parsed.warnings == ["e" * MAX_WARNING_LENGTH]
+    assert parsed.proposals[0].warnings == ["w" * MAX_WARNING_LENGTH]
+
+
+def test_warning_over_limit_is_rejected():
+    with pytest.raises(AiProposalValidationError):
+        parse_ai_proposal_json(_envelope(_proposal(warnings=["w" * (MAX_WARNING_LENGTH + 1)])))
+
+
+def test_too_many_warnings_rejected():
+    with pytest.raises(AiProposalValidationError):
+        parse_ai_proposal_json(_envelope(warnings=["w"] * (MAX_WARNINGS_PER_ENVELOPE + 1)))
+    with pytest.raises(AiProposalValidationError):
+        parse_ai_proposal_json(_envelope(_proposal(warnings=["w"] * (MAX_WARNINGS_PER_PROPOSAL + 1))))
+
+
+def test_json_schema_has_warning_bounds():
+    schema_path = "docs/architecture/G04_AI_OUTPUT_SCHEMA.json"
+    with open(schema_path, encoding="utf-8") as handle:
+        schema = json.load(handle)
+    envelope_warnings = schema["properties"]["warnings"]
+    proposal_warnings = schema["properties"]["proposals"]["items"]["properties"]["warnings"]
+    assert envelope_warnings["maxItems"] == MAX_WARNINGS_PER_ENVELOPE
+    assert envelope_warnings["items"]["maxLength"] == MAX_WARNING_LENGTH
+    assert proposal_warnings["maxItems"] == MAX_WARNINGS_PER_PROPOSAL
+    assert proposal_warnings["items"]["maxLength"] == MAX_WARNING_LENGTH
 
 
 def test_prompt_and_model_metadata_saved():
