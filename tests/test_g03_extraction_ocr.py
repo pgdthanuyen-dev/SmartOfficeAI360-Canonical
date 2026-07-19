@@ -19,7 +19,11 @@ from tools.qlvb_downloader.extraction_models import (
     normalize_extracted_text,
     validate_extracted_page,
 )
-from tools.qlvb_downloader.extraction_repository import ExtractionRepository, init_extraction_schema
+from tools.qlvb_downloader.extraction_repository import (
+    CACHE_SAFETY_MIGRATION_VERSION,
+    ExtractionRepository,
+    init_extraction_schema,
+)
 from tools.qlvb_downloader.extraction_service import ExtractionService, detect_file_type
 from tools.qlvb_downloader.ocr_adapter import OcrAdapter, OcrOutput
 
@@ -388,6 +392,218 @@ def test_force_extraction_bypasses_cache(tmp_path):
         conn.close()
 
 
+def test_force_failure_preserves_previous_success_result(tmp_path, monkeypatch):
+    path = tmp_path / "doc.txt"
+    path.write_text("Old successful text", encoding="utf-8")
+    conn, domain_repo, extraction_repo = _repo()
+    try:
+        _seed_attachment(domain_repo, path)
+        adapter = FakeOcrAdapter()
+        first = _extract(extraction_repo, path, adapter)
+        old_pages = extraction_repo.list_pages(first.id)
+        old_hash = first.normalized_text_sha256
+        old_page_hash = old_pages[0]["text_sha256"]
+        old_text = old_pages[0]["text"]
+
+        import tools.qlvb_downloader.extraction_service as service_module
+        from tools.qlvb_downloader.extraction_service import _page
+
+        def fake_two_pages(_path):
+            return (
+                [
+                    _page("", 1, "Replacement page one", ExtractionMethod.DIRECT_TEXT),
+                    _page("", 2, "Replacement page two", ExtractionMethod.DIRECT_TEXT),
+                ],
+                ExtractionMethod.DIRECT_TEXT,
+                [],
+            )
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fake_two_pages)
+        failed = ExtractionService(FailingPageRepository(conn)).extract_attachment(
+            "doc-1",
+            "att-1",
+            path,
+            force=True,
+            ocr_adapter=adapter,
+        )
+
+        rows = conn.execute("SELECT * FROM extraction_results WHERE status = 'SUCCEEDED'").fetchall()
+        pages = extraction_repo.list_pages(first.id)
+        assert failed.status == ExtractionStatus.FAILED
+        assert len(rows) == 1
+        assert rows[0]["id"] == first.id
+        assert rows[0]["normalized_text_sha256"] == old_hash
+        assert pages[0]["text"] == old_text
+        assert pages[0]["text_sha256"] == old_page_hash
+    finally:
+        conn.close()
+
+
+def test_force_failure_records_failed_attempt(tmp_path, monkeypatch):
+    path = tmp_path / "doc.txt"
+    path.write_text("Old successful text", encoding="utf-8")
+    conn, domain_repo, extraction_repo = _repo()
+    try:
+        _seed_attachment(domain_repo, path)
+        _extract(extraction_repo, path, FakeOcrAdapter())
+
+        import tools.qlvb_downloader.extraction_service as service_module
+        from tools.qlvb_downloader.extraction_service import _page
+
+        def fake_two_pages(_path):
+            return (
+                [
+                    _page("", 1, "Replacement page one", ExtractionMethod.DIRECT_TEXT),
+                    _page("", 2, "Replacement page two", ExtractionMethod.DIRECT_TEXT),
+                ],
+                ExtractionMethod.DIRECT_TEXT,
+                [],
+            )
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fake_two_pages)
+        failed = ExtractionService(FailingPageRepository(conn)).extract_attachment(
+            "doc-1",
+            "att-1",
+            path,
+            force=True,
+            ocr_adapter=FakeOcrAdapter(),
+        )
+
+        attempts = extraction_repo.list_attempts("att-1")
+        failed_attempts = [attempt for attempt in attempts if attempt["status"] == "FAILED"]
+        assert failed.status == ExtractionStatus.FAILED
+        assert len(failed_attempts) == 1
+        assert failed_attempts[0]["result_id"] is None
+        assert failed_attempts[0]["force_requested"] == 1
+        assert failed_attempts[0]["error_code"] == "EXTRACTION_FAILED"
+        assert failed_attempts[0]["error_message"]
+        assert len(failed_attempts[0]["error_message"]) <= 1000
+        assert conn.execute("SELECT COUNT(*) FROM extracted_pages WHERE extraction_result_id = ?", (failed.id,)).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_non_force_after_failed_force_returns_old_cache(tmp_path, monkeypatch):
+    path = tmp_path / "doc.txt"
+    path.write_text("Old successful text", encoding="utf-8")
+    conn, domain_repo, extraction_repo = _repo()
+    try:
+        _seed_attachment(domain_repo, path)
+        adapter = FakeOcrAdapter()
+        first = _extract(extraction_repo, path, adapter)
+
+        import tools.qlvb_downloader.extraction_service as service_module
+        from tools.qlvb_downloader.extraction_service import _page
+
+        def fake_two_pages(_path):
+            return (
+                [
+                    _page("", 1, "Replacement page one", ExtractionMethod.DIRECT_TEXT),
+                    _page("", 2, "Replacement page two", ExtractionMethod.DIRECT_TEXT),
+                ],
+                ExtractionMethod.DIRECT_TEXT,
+                [],
+            )
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fake_two_pages)
+        ExtractionService(FailingPageRepository(conn)).extract_attachment(
+            "doc-1",
+            "att-1",
+            path,
+            force=True,
+            ocr_adapter=adapter,
+        )
+
+        def fail_if_called(_path):
+            raise AssertionError("extractor should not run on cache hit")
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fail_if_called)
+        second = _extract(extraction_repo, path, adapter)
+        assert second.id == first.id
+        assert second.normalized_text_sha256 == first.normalized_text_sha256
+    finally:
+        conn.close()
+
+
+def test_successful_force_atomically_replaces_old_cache(tmp_path, monkeypatch):
+    path = tmp_path / "doc.txt"
+    path.write_text("Old successful text", encoding="utf-8")
+    conn, domain_repo, extraction_repo = _repo()
+    try:
+        _seed_attachment(domain_repo, path)
+        adapter = FakeOcrAdapter()
+        first = _extract(extraction_repo, path, adapter)
+
+        import tools.qlvb_downloader.extraction_service as service_module
+        from tools.qlvb_downloader.extraction_service import _page
+
+        def fake_two_pages(_path):
+            return (
+                [
+                    _page("", 1, "New page one", ExtractionMethod.DIRECT_TEXT),
+                    _page("", 2, "New page two", ExtractionMethod.DIRECT_TEXT),
+                ],
+                ExtractionMethod.DIRECT_TEXT,
+                [],
+            )
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fake_two_pages)
+        second = _extract(extraction_repo, path, adapter, force=True)
+        cache_rows = conn.execute("SELECT id FROM extraction_results").fetchall()
+        attempts = extraction_repo.list_attempts("att-1")
+        orphan_pages = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM extracted_pages p
+            LEFT JOIN extraction_results r ON r.id = p.extraction_result_id
+            WHERE r.id IS NULL
+            """
+        ).fetchone()[0]
+        assert second.status == ExtractionStatus.SUCCEEDED
+        assert first.id != second.id
+        assert [row["id"] for row in cache_rows] == [second.id]
+        assert [page["text"] for page in extraction_repo.list_pages(second.id)] == ["New page one", "New page two"]
+        assert [attempt["status"] for attempt in attempts] == ["SUCCEEDED", "SUCCEEDED"]
+        replacement_attempt = [attempt for attempt in attempts if attempt["result_id"] == second.id][0]
+        assert replacement_attempt["force_requested"] == 1
+        assert orphan_pages == 0
+    finally:
+        conn.close()
+
+
+def test_failed_first_extraction_creates_attempt_not_cache(tmp_path, monkeypatch):
+    path = tmp_path / "doc.txt"
+    path.write_text("First run text", encoding="utf-8")
+    conn, domain_repo, _ = _repo()
+    failing_repo = FailingPageRepository(conn)
+    try:
+        _seed_attachment(domain_repo, path)
+        import tools.qlvb_downloader.extraction_service as service_module
+        from tools.qlvb_downloader.extraction_service import _page
+
+        def fake_two_pages(_path):
+            return (
+                [
+                    _page("", 1, "First page", ExtractionMethod.DIRECT_TEXT),
+                    _page("", 2, "Second page", ExtractionMethod.DIRECT_TEXT),
+                ],
+                ExtractionMethod.DIRECT_TEXT,
+                [],
+            )
+
+        monkeypatch.setattr(service_module, "_extract_txt_pages", fake_two_pages)
+        result = ExtractionService(failing_repo).extract_attachment("doc-1", "att-1", path, ocr_adapter=FakeOcrAdapter())
+        attempts = failing_repo.list_attempts("att-1")
+        assert result.status == ExtractionStatus.FAILED
+        assert conn.execute("SELECT COUNT(*) FROM extraction_results").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM extracted_pages").fetchone()[0] == 0
+        assert len(attempts) == 1
+        assert attempts[0]["status"] == "FAILED"
+        assert attempts[0]["result_id"] is None
+    finally:
+        conn.close()
+
+
 def test_extraction_migration_first_time():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -396,7 +612,7 @@ def test_extraction_migration_first_time():
         init_domain_schema(conn)
         init_extraction_schema(conn)
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"extraction_results", "extracted_pages", "schema_migrations"} <= tables
+        assert {"extraction_results", "extracted_pages", "extraction_attempts", "schema_migrations"} <= tables
     finally:
         conn.close()
 
@@ -413,6 +629,140 @@ def test_extraction_migration_idempotent():
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 'g03_extraction_schema_1'"
         ).fetchone()[0]
         assert count == 1
+    finally:
+        conn.close()
+
+
+def test_attempt_migration_idempotent():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE documents (doc_id TEXT PRIMARY KEY, title TEXT)")
+    try:
+        init_domain_schema(conn)
+        init_extraction_schema(conn)
+        init_extraction_schema(conn)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = ?",
+            (CACHE_SAFETY_MIGRATION_VERSION,),
+        ).fetchone()[0]
+        indexes = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'extraction_attempts'"
+            )
+        }
+        assert count == 1
+        assert {
+            "idx_extraction_attempts_attachment_id",
+            "idx_extraction_attempts_status",
+            "idx_extraction_attempts_created_at",
+        } <= indexes
+    finally:
+        conn.close()
+
+
+def test_attempt_history_does_not_break_legacy_g03_cache(tmp_path):
+    txt = tmp_path / "doc.txt"
+    txt.write_text("Legacy cache text", encoding="utf-8")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("CREATE TABLE documents (doc_id TEXT PRIMARY KEY, title TEXT)")
+    domain_repo = DomainRepository(conn)
+    try:
+        _seed_attachment(domain_repo, txt)
+        conn.execute(
+            """
+            CREATE TABLE extraction_results (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                extractor_name TEXT NOT NULL,
+                extractor_version TEXT NOT NULL,
+                extraction_method TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_file_sha256 TEXT NOT NULL,
+                normalized_text_sha256 TEXT,
+                language TEXT,
+                page_count INTEGER,
+                warnings TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                ocr_version TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                schema_version TEXT NOT NULL,
+                FOREIGN KEY(document_id) REFERENCES documents(doc_id) ON DELETE CASCADE,
+                FOREIGN KEY(attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
+                UNIQUE(attachment_id, source_file_sha256, extractor_name, extractor_version, ocr_version)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE extracted_pages (
+                id TEXT PRIMARY KEY,
+                extraction_result_id TEXT NOT NULL,
+                page_number INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                text_sha256 TEXT NOT NULL,
+                character_count INTEGER NOT NULL,
+                extraction_method TEXT NOT NULL,
+                confidence REAL,
+                width INTEGER,
+                height INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(extraction_result_id) REFERENCES extraction_results(id) ON DELETE CASCADE,
+                UNIQUE(extraction_result_id, page_number)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO extraction_results (
+                id, document_id, attachment_id, extractor_name, extractor_version,
+                extraction_method, status, source_file_sha256, normalized_text_sha256,
+                language, page_count, ocr_version, started_at, completed_at, schema_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-result",
+                "doc-1",
+                "att-1",
+                "canonical_attachment_extractor",
+                "g03.1",
+                "DIRECT_TEXT",
+                "SUCCEEDED",
+                _sha256_file(txt),
+                "c" * 64,
+                "vi",
+                1,
+                "fake-ocr:1",
+                "2026-07-19T00:00:00+00:00",
+                "2026-07-19T00:00:01+00:00",
+                "1.0.0",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO extracted_pages (
+                id, extraction_result_id, page_number, text, text_sha256,
+                character_count, extraction_method, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("legacy-page", "legacy-result", 1, "Legacy cache text", "d" * 64, 17, "DIRECT_TEXT", "2026-07-19T00:00:01+00:00"),
+        )
+        init_extraction_schema(conn)
+        repo = ExtractionRepository(conn)
+        assert repo.get_cached_result(
+            attachment_id="att-1",
+            source_file_sha256=_sha256_file(txt),
+            extractor_name="canonical_attachment_extractor",
+            extractor_version="g03.1",
+            ocr_version="fake-ocr:1",
+        )["id"] == "legacy-result"
+        assert repo.list_pages("legacy-result")[0]["text"] == "Legacy cache text"
+        assert conn.execute("SELECT COUNT(*) FROM extraction_attempts").fetchone()[0] == 0
     finally:
         conn.close()
 

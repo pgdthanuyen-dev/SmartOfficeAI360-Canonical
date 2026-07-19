@@ -54,8 +54,10 @@ flowchart TD
   - `OptionalTesseractOcrAdapter`, used only when installed and configured
 - `tools/qlvb_downloader/extraction_repository.py`
   - additive migration `g03_extraction_schema_1`
+  - additive cache-safety migration `g03_extraction_cache_safety_1`
   - `extraction_results`, `extracted_pages`
-  - cache lookup and atomic save
+  - `extraction_attempts`
+  - cache lookup, attempt history and atomic cache replacement
 - `tools/qlvb_downloader/extraction_service.py`
   - GUI-independent service: `ExtractionService.extract_attachment(...)`
   - validates attachment state, hash, format, cache and persistence
@@ -89,6 +91,7 @@ Tables:
 
 - `extraction_results`
 - `extracted_pages`
+- `extraction_attempts`
 
 Important constraints:
 
@@ -97,7 +100,33 @@ Important constraints:
 - unique cache key: `attachment_id`, `source_file_sha256`, `extractor_name`, `extractor_version`, `ocr_version`
 - `page_number` starts at 1 and is unique per result
 
-The repository saves result and pages in one transaction. If page insertion fails, the transaction is rolled back and the service records a failed result without partial pages.
+`extraction_results` and `extracted_pages` are the cacheable extraction output. `extraction_attempts` is append-only run history. FAILED attempts are not stored as replacement cache results.
+
+The repository saves successful forced refreshes in one transaction:
+
+1. delete the old cache row for the same cache key;
+2. insert the new result;
+3. insert every page;
+4. insert a SUCCEEDED attempt linked to the new result;
+5. commit.
+
+If page insertion fails, the whole replacement transaction rolls back. The previous successful cache result and its pages remain intact. The service then records a separate FAILED attempt with `result_id = null`; if recording that attempt fails, the old cache still remains intact and the returned result carries a structured warning.
+
+```mermaid
+flowchart TD
+    A["force=True refresh"] --> B["Begin cache replacement transaction"]
+    B --> C["Delete old cache for same key"]
+    C --> D["Insert new extraction_result"]
+    D --> E["Insert all extracted_pages"]
+    E --> F{"All pages inserted?"}
+    F -- "yes" --> G["Insert SUCCEEDED extraction_attempt"]
+    G --> H["Commit: new cache is active"]
+    F -- "no" --> I["Rollback: old cache and pages are restored"]
+    I --> J["Insert separate FAILED extraction_attempt"]
+    J --> K["Return FAILED to caller"]
+```
+
+Non-forced extraction reads only cacheable statuses: `SUCCEEDED`, `SUCCEEDED_WITH_WARNINGS`, and `NO_TEXT`. It never treats `FAILED` attempts as cache hits.
 
 ## Error Handling
 
@@ -113,7 +142,7 @@ The service returns structured result rows for:
 - `UNSUPPORTED_FORMAT`
 - `EXTRACTION_FAILED`
 
-Old successful results are not deleted before extraction starts. Replacement happens inside the final save transaction.
+Old successful results are not deleted before extraction starts. Replacement happens only inside the final successful save transaction. A FAILED attempt never replaces a successful cache entry.
 
 ## Security
 

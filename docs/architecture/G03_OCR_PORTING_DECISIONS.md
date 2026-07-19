@@ -62,3 +62,9 @@ Before production OCR is enabled by default:
 - Harden `user_unit_mappings` NULL-role uniqueness in G06, as noted in the G02 merge report.
 - Add DOC binary conversion only if a safe local converter is approved.
 - Add ZIP member extraction in a later stage with path traversal protection and size limits.
+
+## Cache Safety R2
+
+The cache-safety repair is Canonical-specific design work, not ported from Source B. Source B was useful for OCR fallback ideas, but it did not provide the attachment-domain split between cacheable extraction results and attempt history.
+
+Canonical now stores successful extraction output in `extraction_results` plus `extracted_pages`, while every run can be audited in `extraction_attempts`. A failed forced refresh records a FAILED attempt without deleting the previous successful result. This keeps downstream AI/review stages from losing the last known-good text when a retry fails midway.
