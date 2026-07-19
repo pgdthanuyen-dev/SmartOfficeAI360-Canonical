@@ -1,0 +1,36 @@
+SMART OFFICE AI 360 - V22.1.5 QLVB DOWNLOADER FIRST RUN GUARD BUILD
+
+1. Dieu chinh cau truc van hanh
+- Thu muc goc chi con 01 file chay chinh: BAT_DAU_CHAY_SMART_OFFICE_AI_360.bat.
+- Chuyen cac file .bat ky thuat vao tools\launchers.
+- Giam nguy co nguoi dung bam nham file.
+
+2. Bo sung menu dieu khien
+- Menu tieng Viet dang chon so.
+- Gom tat ca thao tac: cai dat, cau hinh, kiem tra, page probe, dry-run, test 01 ho so, chay that, chay nen, mo bao cao, mo log, mo du lieu.
+
+3. Bo sung cai dat lan dau
+- Kiem tra Python.
+- Tao cac thu muc Data can thiet.
+- Cai requirements.txt.
+- Cai Playwright Chromium.
+
+4. Bo sung thu muc chuan
+- Data\reports
+- Data\index
+- Data\support_packages
+- Data\runtime
+- Data\logs\page_probe
+
+5. Giu nguyen loi xu ly V22.1.3
+- Dry-run.
+- Page probe.
+- Bao cao HTML/CSV.
+- Metadata/status/READY queue.
+- Retry mo chi tiet va tai file.
+
+6. Huong nang cap tiep theo
+- V22.1.5: kiem tra moi truong thong minh hon.
+- V22.1.6: index chong trung ho so.
+- V22.1.7: xuat goi loi gui ky thuat.
+- V22.1.8: dashboard Tkinter chinh thuc.

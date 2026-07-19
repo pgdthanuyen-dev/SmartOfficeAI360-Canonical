@@ -1,0 +1,40 @@
+CHECKLIST TEST THẬT V22.1
+
+1. Kiểm tra cấu hình
+[ ] Đã nhập đúng địa chỉ QLVB.
+[ ] Đã nhập đúng link đăng nhập.
+[ ] Đã nhập đúng link văn bản đến.
+[ ] Đã nhập đúng link văn bản đi.
+[ ] Đã nhập tài khoản, mật khẩu.
+[ ] Đã chọn nơi lưu Data.
+
+2. Test đăng nhập
+[ ] Chạy run_qlvb_downloader.bat ở chế độ hiện trình duyệt.
+[ ] Tool mở được trang QLVB.
+[ ] Tool tự điền tài khoản/mật khẩu.
+[ ] Nếu có CAPTCHA/OTP, đăng nhập thủ công một lần.
+[ ] Chạy lại, tool nhận phiên đăng nhập đã lưu.
+
+3. Test văn bản đến
+[ ] Mở được link văn bản đến.
+[ ] Đọc được bảng danh sách.
+[ ] Tạo thư mục trong Data/files/incoming.
+[ ] Tải được file đính kèm.
+[ ] Tạo metadata.json.
+[ ] Tạo status.json.
+[ ] Tạo Data/queue/incoming/.../READY.
+
+4. Test văn bản đi
+[ ] Mở được link văn bản đi.
+[ ] Đọc được bảng danh sách.
+[ ] Tạo thư mục trong Data/files/outgoing.
+[ ] Tải được file đính kèm.
+[ ] Tạo metadata.json.
+[ ] Tạo status.json.
+[ ] Tạo Data/queue/outgoing/.../READY.
+
+5. Nếu lỗi
+[ ] Gửi file Data/logs/qlvb_downloader_*.log mới nhất.
+[ ] Gửi Data/logs/qlvb_downloader_last_run_summary.json.
+[ ] Gửi screenshot.png trong Data/logs/errors.
+[ ] Ghi rõ dừng ở bước: đăng nhập / đọc bảng / mở chi tiết / tải file / tạo queue.

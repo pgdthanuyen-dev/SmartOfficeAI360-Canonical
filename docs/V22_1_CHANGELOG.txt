@@ -1,0 +1,35 @@
+CHANGELOG V22.1 - QLVB DOWNLOADER REAL TEST BUILD
+
+So với V22.0.9_QLVB_DOWNLOADER_UX_POLISH_BUILD, bản này bổ sung lõi chạy thật:
+
+1. Thêm module tools/qlvb_downloader
+- config.py: đọc cấu hình, tương thích tên trường cũ.
+- downloader.py: tự động trình duyệt, đăng nhập, mở link danh sách, đọc bảng, mở chi tiết, tải đính kèm.
+- parser.py: nhận diện metadata và file đính kèm.
+- storage.py: lưu files, metadata, status, queue READY.
+- runner.py: chạy bằng dòng lệnh hoặc file .bat.
+- gui_tk.py: màn hình cấu hình/test độc lập để đối chiếu với menu hiện có của phần mềm.
+
+2. Thêm cấu trúc Data chuẩn
+- Data/config
+- Data/files/incoming
+- Data/files/outgoing
+- Data/queue/incoming
+- Data/queue/outgoing
+- Data/logs/errors
+- Data/runtime/browser_profile
+
+3. Thêm cơ chế lưu phiên
+- Dùng browser profile riêng tại Data/runtime/browser_profile.
+- Nếu đăng nhập thành công, lần chạy sau có thể dùng lại phiên.
+
+4. Thêm log phục vụ vá tiếp
+- Lưu log .log.
+- Lưu summary JSON.
+- Lưu HTML và screenshot khi lỗi.
+
+5. Trạng thái hồ sơ
+- READY: có file tải thành công.
+- READY_NO_ATTACHMENT: đọc được metadata nhưng chưa thấy file.
+- READY_ATTACHMENT_ERROR: thấy file nhưng tải lỗi.
+- ERROR: lỗi khi xử lý hồ sơ.

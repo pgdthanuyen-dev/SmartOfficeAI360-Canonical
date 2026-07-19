@@ -1,0 +1,18 @@
+GHI CHÚ TÍCH HỢP VÀO PHẦN MỀM HIỆN CÓ
+
+Nếu phần mềm Smart Office AI 360 hiện tại đã có menu “Tải văn bản QLVB”, có thể gọi module này theo một trong hai cách:
+
+Cách 1 - Gọi bằng subprocess:
+python -m tools.qlvb_downloader.runner --directions both --headless false --max-items 30
+
+Cách 2 - Gọi trực tiếp trong Python:
+from tools.qlvb_downloader.config import load_config
+from tools.qlvb_downloader.downloader import QLVBDownloader
+
+cfg = load_config()
+summary = QLVBDownloader(cfg).run(directions=["incoming", "outgoing"], headless=False, max_items=30)
+
+Gợi ý nối vào luồng AI xử lý văn bản:
+- Theo dõi thư mục Data/queue/incoming/*/READY
+- Theo dõi thư mục Data/queue/outgoing/*/READY
+- Khi AI xử lý xong thì đổi READY thành DONE hoặc tạo DONE.ok để tránh xử lý lặp.

@@ -1,0 +1,29 @@
+SMART OFFICE AI 360 - V22.1.4 QLVB DOWNLOADER REAL STABILIZATION BUILD
+
+1. Mục tiêu
+- Tăng khả năng chạy thật khi giao diện QLVB thay đổi theo từng đơn vị.
+- Dễ bắt lỗi hơn để vá selector/luồng tải file ở các bản tiếp theo.
+- Chuẩn hóa dữ liệu đầu ra để kết nối với module AI xử lý văn bản.
+
+2. Nâng cấp chính
+- Bổ sung dry-run: chỉ đăng nhập, mở danh sách, bóc metadata, không tải file.
+- Bổ sung page probe: kiểm tra cấu trúc trang QLVB, số lượng selector khớp, lưu HTML/ảnh/json.
+- Bổ sung báo cáo HTML sau mỗi lượt chạy: Data/logs/qlvb_downloader_last_run_report.html.
+- Bổ sung báo cáo CSV cộng dồn: Data/logs/qlvb_downloader_run_report.csv.
+- Retry mở trang chi tiết văn bản.
+- Retry tải file đính kèm.
+- Mở rộng selector bảng cho Kendo UI, DevExtreme, Ant Table, Element Table, Vuetify.
+- Chuẩn hóa queue: chỉ hồ sơ trạng thái READY* mới đưa vào Data/queue/.../READY.
+- Hồ sơ lỗi vẫn ghi metadata/status trong Data/files để tra cứu, nhưng không đẩy READY cho AI xử lý.
+
+3. File chạy mới
+- run_qlvb_downloader_1_item_debug.bat: chạy thử 01 hồ sơ.
+- run_qlvb_downloader_dry_run.bat: quét thử không tải file.
+- run_qlvb_page_probe.bat: soi cấu trúc trang QLVB.
+- open_last_report.bat: mở báo cáo HTML mới nhất.
+
+4. Khuyến nghị test
+- Chạy run_qlvb_page_probe.bat trước để lấy cấu trúc trang.
+- Chạy run_qlvb_downloader_dry_run.bat để kiểm tra metadata.
+- Chạy run_qlvb_downloader_1_item_debug.bat để thử tải 01 hồ sơ.
+- Sau đó mới chạy run_qlvb_downloader.bat.

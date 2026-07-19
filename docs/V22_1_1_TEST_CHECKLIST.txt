@@ -1,0 +1,42 @@
+CHECKLIST TEST V22.1.5 FIRST RUN GUARD
+=============================
+
+1. Kiểm tra cấu hình
+--------------------
+[ ] Chạy run_qlvb_config_gui.bat
+[ ] Nhập link QLVB, tài khoản, link văn bản đến, link văn bản đi
+[ ] Bấm Lưu cấu hình
+[ ] Chạy check_qlvb_config.bat
+[ ] Kiểm tra không lộ mật khẩu trong màn hình in cấu hình
+
+2. Test đăng nhập
+-----------------
+[ ] Chạy run_qlvb_downloader.bat ở chế độ hiện trình duyệt
+[ ] Nếu tự đăng nhập được: kiểm tra log có dòng đăng nhập thành công
+[ ] Nếu có CAPTCHA/OTP: đăng nhập thủ công trong trình duyệt
+[ ] Chạy lại lần 2 để xác nhận phiên đã được lưu
+
+3. Test văn bản đến
+-------------------
+[ ] Bấm Chạy test văn bản đến từ GUI hoặc chạy runner --directions incoming
+[ ] Kiểm tra Data/files/incoming có thư mục hồ sơ
+[ ] Kiểm tra metadata.json
+[ ] Kiểm tra status.json
+[ ] Kiểm tra file đính kèm tải về
+[ ] Kiểm tra Data/queue/incoming/<doc_id>/READY có READY.ok
+
+4. Test văn bản đi
+------------------
+[ ] Bấm Chạy test văn bản đi từ GUI hoặc chạy runner --directions outgoing
+[ ] Kiểm tra Data/files/outgoing
+[ ] Kiểm tra Data/queue/outgoing/<doc_id>/READY
+
+5. Test chạy lại
+----------------
+[ ] Chạy lại cùng cấu hình
+[ ] Nếu bật bỏ qua hồ sơ đã READY, kiểm tra log có dòng bỏ qua hồ sơ đã READY
+
+6. Khi lỗi
+----------
+[ ] Gửi trợ lý file log mới nhất trong Data/logs
+[ ] Gửi thư mục lỗi mới nhất trong Data/logs/errors gồm page.html, screenshot.png, debug.json

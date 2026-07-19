@@ -1,0 +1,14 @@
+CHECKLIST TEST V22.1.4
+
+[ ] 1. Giải nén gói phần mềm vào thư mục không dấu, ví dụ: D:\SmartOfficeAI360.
+[ ] 2. Chạy install_playwright.bat.
+[ ] 3. Chạy run_qlvb_config_gui.bat và kiểm tra cấu hình.
+[ ] 4. Chạy check_qlvb_config.bat.
+[ ] 5. Chạy run_qlvb_page_probe.bat.
+[ ] 6. Kiểm tra Data/logs/page_probe/page_probe.json, page_probe.html, page_probe.png.
+[ ] 7. Chạy run_qlvb_downloader_dry_run.bat.
+[ ] 8. Kiểm tra Data/logs/qlvb_downloader_last_run_report.html.
+[ ] 9. Chạy run_qlvb_downloader_1_item_debug.bat.
+[ ] 10. Kiểm tra Data/files/incoming hoặc Data/files/outgoing.
+[ ] 11. Kiểm tra Data/queue/.../READY có metadata.json, status.json, READY.ok.
+[ ] 12. Nếu lỗi, gửi Data/logs/errors và Data/logs/page_probe cho trợ lý để vá V22.1.4.

@@ -1,0 +1,20 @@
+GỢI Ý VÁ TIẾP SAU KHI SẾP TEST THỰC TẾ
+========================================
+
+Nếu vẫn chưa tải được file, cần xem Data/logs/errors để xác định một trong các trường hợp:
+
+1. Không đọc được bảng danh sách
+- Cần cập nhật selector rows/table theo HTML thực tế.
+
+2. Đọc được danh sách nhưng không vào được chi tiết
+- Cần cập nhật selector detail_link hoặc luồng click mở chi tiết nếu hệ thống dùng javascript không có href.
+
+3. Vào được chi tiết nhưng không thấy file đính kèm
+- Cần cập nhật selector attachment_links.
+- Có thể file nằm trong iframe/tab riêng.
+
+4. Thấy file nhưng không tải được
+- Nếu href là javascript và click không sinh download, cần đọc hàm javascript trong page.html để gọi đúng API tải.
+
+5. Tải được nhưng file sai tên/sai định dạng
+- Cần kiểm tra response header Content-Disposition hoặc API trả blob.

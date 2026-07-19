@@ -1,0 +1,30 @@
+SMART OFFICE AI 360 - V22.1.5 QLVB DOWNLOADER FIRST RUN GUARD BUILD
+
+1. Muc tieu
+- Nang cap V22.1.4 theo huong an toan hon khi chay lan dau.
+- Giam tinh trang bam chay that khi chua du moi truong/cau hinh.
+- Tao bao cao kiem tra de nguoi dung va ky thuat bat loi nhanh.
+
+2. Nang cap moi
+- Them module tools/qlvb_downloader/doctor.py.
+- Kiem tra Python, pip, playwright, tkinter, Playwright CLI.
+- Kiem tra mo thu Chromium Playwright neu chay cai dat lan dau.
+- Tu tao cac thu muc Data can thiet.
+- Tu tao Data/config/qlvb_downloader_config.json tu file mau neu thieu.
+- Kiem tra link QLVB, ten dang nhap, link van ban den/di, quyen ghi Data.
+- Canh bao mat khau neu dang duoc luu trong file cau hinh.
+- Ghi bao cao:
+  + Data/logs/environment_check_report.txt
+  + Data/logs/environment_check_report.json
+- Them chuc nang xuat goi loi/gui ky thuat:
+  + Data/support_packages/support_qlvb_YYYYMMDD_HHMMSS.zip
+- Goi loi tu dong che mat khau/token trong cau hinh.
+
+3. Cap nhat menu
+- Muc 3 doi thanh: Kiem tra moi truong va cau hinh thong minh.
+- Them muc 13: Xuat goi loi/gui ky thuat.
+- Cac lenh chay that/test/dry-run/page-probe deu kiem tra nhanh truoc khi chay.
+
+4. Ghi chu
+- Ban nay giu nguyen loi tai QLVB cua V22.1.3/V22.1.4.
+- Trong tam la tang do on dinh van hanh va chong loi do thieu cai dat/cau hinh.

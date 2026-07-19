@@ -1,0 +1,54 @@
+SMART OFFICE AI 360 - V22.1.4 QLVB DOWNLOADER HOTFIX CHANGELOG
+================================================================
+
+Ngày build: 27/04/2026
+Mốc nâng cấp từ: SmartOfficeAI360_V22_1_1_QLVB_DOWNLOADER_HOTFIX_BUILD
+Tên bản: SmartOfficeAI360_V22_1_1_QLVB_DOWNLOADER_HOTFIX_BUILD
+
+1. Lỗi nghiêm trọng đã vá
+-------------------------
+- Bổ sung max_pages_per_direction vào DownloadConfig.
+- Tránh AttributeError khi downloader gọi self.config.download.max_pages_per_direction.
+
+2. Đăng nhập/lưu phiên
+----------------------
+- Thêm allow_manual_login.
+- Thêm manual_login_wait_seconds.
+- Nếu có CAPTCHA/OTP hoặc không tìm thấy selector đăng nhập, tool cho phép người dùng đăng nhập thủ công trong trình duyệt đang mở.
+- Phiên đăng nhập tiếp tục lưu tại Data/runtime/browser_profile.
+
+3. Quét danh sách QLVB
+----------------------
+- Giữ tab danh sách riêng.
+- Mở chi tiết văn bản bằng tab phụ để không làm mất ngữ cảnh phân trang.
+- Sau khi xử lý xong một trang, tab danh sách vẫn còn nguyên để bấm trang tiếp theo.
+
+4. Tải file đính kèm
+--------------------
+- Tìm link tải bằng cách so khớp href tuyệt đối/thô thay vì CSS selector dễ lỗi khi href có ký tự đặc biệt.
+- Ưu tiên click để Playwright bắt download.
+- Nếu click không tạo download thì fallback tải trực tiếp bằng request trong cùng phiên đăng nhập.
+- Nhận diện tên file tốt hơn từ Content-Disposition.
+
+5. Metadata/log
+---------------
+- Bổ sung detail_body_excerpt.
+- Bổ sung detail_pairs từ table và dt/dd.
+- Khi lỗi lưu thêm debug.json cùng page.html và screenshot.png.
+
+6. Chạy lại không trùng
+-----------------------
+- Bổ sung skip_existing.
+- Nếu hồ sơ đã có status READY/READY_NO_ATTACHMENT thì có thể bỏ qua khi chạy lại.
+
+7. Giao diện cấu hình
+---------------------
+- Cập nhật tiêu đề V22.1.5 FIRST RUN GUARD.
+- Thêm số văn bản tối đa/lần chạy.
+- Thêm số trang danh sách tối đa.
+- Thêm thời gian chờ đăng nhập thủ công.
+- Thêm mở thư mục Data.
+
+8. File hỗ trợ mới
+------------------
+- check_qlvb_config.bat: kiểm tra cấu hình đã chuẩn hóa, không mở trình duyệt.

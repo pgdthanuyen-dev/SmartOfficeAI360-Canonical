@@ -1,0 +1,60 @@
+========================================================================
+             HƯỚNG DẪN SỬ DỤNG SMART OFFICE AI 360 DESKTOP AGENT
+========================================================================
+
+Ứng dụng SmartOfficeAI360 Desktop Agent được thiết kế để tự động hóa việc
+tải văn bản từ hệ thống Quản lý văn bản (QLVB) và đồng bộ hóa sang hệ thống
+Planner KPI.
+
+------------------------------------------------------------------------
+I. HƯỚNG DẪN CÀI ĐẶT LẦN ĐẦU (CHO KỸ THUẬT VIÊN / NGƯỜI VẬN HÀNH)
+------------------------------------------------------------------------
+Để giữ cho kích thước gói cài đặt nhẹ (dưới 35MB), trình duyệt Chromium
+của Playwright không được đóng gói sẵn trong file .exe. 
+
+Hãy thực hiện bước sau ở lần đầu tiên chạy ứng dụng trên máy tính mới:
+1. Đảm bảo máy tính đã cài đặt Python 3.10+ và các thư viện cần thiết.
+2. Mở Command Prompt (cmd) và chạy lệnh sau để tải trình duyệt Chromium:
+   
+   python -m playwright install chromium
+
+(Hoặc bạn có thể chọn Option 1 "Cai dat lan dau" từ trinh dieu khien BAT).
+
+------------------------------------------------------------------------
+II. QUY TRÌNH 3 BƯỚC VẬN HÀNH TRÊN GIAO DIỆN
+------------------------------------------------------------------------
+Bước 1: Cấu hình hệ thống (Tab "Cấu hình")
+- Nhập địa chỉ Base URL QLVB, đường dẫn danh sách văn bản đến và đi.
+- Nhập tài khoản đăng nhập QLVB.
+- Nhập địa chỉ API Planner KPI URL và Ingest Token.
+- Click nút "Lưu cấu hình".
+
+Bước 2: Đăng nhập và Giải CAPTCHA (Tab "Đăng nhập QLVB")
+- Click nút "Mở trình duyệt đăng nhập".
+- Cửa sổ trình duyệt QLVB thực tế sẽ hiện ra.
+- Thực hiện nhập tài khoản, mật khẩu và giải mã CAPTCHA/OTP thủ công.
+- Sau khi đăng nhập thành công vào màn hình chính của QLVB, trình duyệt
+  sẽ tự động đóng và lưu phiên (session). 
+- Các lần chạy sau có thể tích chọn "Chạy ẩn trình duyệt" (Headless) mà
+  không cần đăng nhập lại cho đến khi phiên làm việc hết hạn.
+
+Bước 3: Tải văn bản và Đồng bộ hóa (Tab "Tải văn bản" & Tab "Đồng bộ KPI")
+- Chuyển sang Tab "Tải văn bản", chọn hướng tải và bấm "Bắt đầu tải".
+- Các văn bản tải về sẽ tự động xếp vào hàng đợi tại:
+  Data/queue/<incoming|outgoing>/<doc_id>/
+- Chuyển sang Tab "Đồng bộ KPI", bấm "Đồng bộ tất cả PENDING" để đẩy
+  dữ liệu văn bản và file đính kèm sang Planner KPI.
+
+------------------------------------------------------------------------
+III. CẢNH BÁO BẢO MẬT QUAN TRỌNG
+------------------------------------------------------------------------
+1. Tuyệt đối KHÔNG sử dụng công cụ để quét, tải hoặc lưu trữ các văn bản
+   có độ mật: MẬT, TỐI MẬT, TUYỆT MẬT.
+2. Không chia sẻ thư mục "Data/runtime" cho bất kỳ ai vì thư mục này lưu
+   trữ session cookies đăng nhập của bạn.
+3. Tuyệt đối không commit file cấu hình thực tế chứa mật khẩu thực tế
+   (qlvb_downloader_config.json) lên kho mã nguồn Git chung. Dự án đã
+   tự động cấu hình loại trừ file này qua .gitignore.
+4. Khi gặp lỗi, hãy vào Tab "Nhật ký" -> Chọn "Xuất gói chẩn đoán" để tạo
+   file zip chứa log lỗi sạch (đã ẩn mật khẩu/token) gửi cho bộ phận
+   hỗ trợ kỹ thuật.
