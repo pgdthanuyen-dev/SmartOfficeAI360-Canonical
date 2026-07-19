@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import unicodedata
 from typing import Any, Protocol
 
 from .ai_proposal_models import (
     AI_PROPOSAL_SCHEMA_VERSION,
+    IDEMPOTENCY_CONFLICT_ERROR_CODE,
     AiCitation,
     AiProposal,
     AiProposalEnvelope,
     AiProposalIngestResult,
     ProposalDedupeStatus,
     ProposalPersistStatus,
+    compact_error,
     normalize_for_fingerprint,
     proposal_fingerprint,
 )
@@ -43,6 +46,16 @@ class FakeAiProposalProvider:
         return self.response
 
 
+class AiProposalIdempotencyConflict(AiProposalValidationError):
+    def __init__(self, *, idempotency_key: str, existing_batch_id: str):
+        self.error_code = IDEMPOTENCY_CONFLICT_ERROR_CODE
+        self.idempotency_key = idempotency_key
+        self.existing_batch_id = existing_batch_id
+        super().__init__(
+            f"{self.error_code}: idempotency_key={idempotency_key} existing_batch_id={existing_batch_id}"
+        )
+
+
 class AiProposalService:
     def __init__(self, repository: AiProposalRepository):
         self.repository = repository
@@ -54,10 +67,6 @@ class AiProposalService:
         idempotency_key: str,
         strict: bool = True,
     ) -> AiProposalIngestResult:
-        existing_batch = self.repository.get_batch_by_idempotency_key(idempotency_key)
-        if existing_batch is not None:
-            return self._result_from_existing_batch(existing_batch)
-
         try:
             envelope = parse_ai_proposal_json(response_json, strict=strict)
             raw_response_sha256 = _stable_response_hash(response_json)
@@ -65,6 +74,13 @@ class AiProposalService:
                 raise AiProposalValidationError("envelope document_id does not match requested document_id")
             if not self.repository.document_exists(document_id):
                 raise AiProposalValidationError("document does not exist")
+            existing_batch = self.repository.get_batch_by_idempotency_key(idempotency_key)
+            if existing_batch is not None:
+                return self._result_from_existing_batch_or_conflict(
+                    existing_batch,
+                    raw_response_sha256=raw_response_sha256,
+                    idempotency_key=idempotency_key,
+                )
         except (AiProposalValidationError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             return AiProposalIngestResult(
                 batch_id="",
@@ -74,20 +90,30 @@ class AiProposalService:
                 duplicate_count=0,
                 warning_count=0,
                 action_item_ids=[],
-                errors=[str(exc)],
+                errors=[compact_error(str(exc))],
             )
 
-        batch_id = self.repository.create_batch(
-            document_id=document_id,
-            idempotency_key=idempotency_key,
-            schema_version=envelope.schema_version,
-            model_name=envelope.model_name,
-            model_version=envelope.model_version,
-            prompt_version=envelope.prompt_version,
-            generated_at=envelope.generated_at,
-            raw_response_sha256=raw_response_sha256,
-            received_count=len(envelope.proposals),
-        )
+        try:
+            batch_id = self.repository.create_batch(
+                document_id=document_id,
+                idempotency_key=idempotency_key,
+                schema_version=envelope.schema_version,
+                model_name=envelope.model_name,
+                model_version=envelope.model_version,
+                prompt_version=envelope.prompt_version,
+                generated_at=envelope.generated_at,
+                raw_response_sha256=raw_response_sha256,
+                received_count=len(envelope.proposals),
+            )
+        except sqlite3.IntegrityError:
+            existing_batch = self.repository.get_batch_by_idempotency_key(idempotency_key)
+            if existing_batch is None:
+                raise
+            return self._result_from_existing_batch_or_conflict(
+                existing_batch,
+                raw_response_sha256=raw_response_sha256,
+                idempotency_key=idempotency_key,
+            )
 
         accepted_count = 0
         rejected_count = 0
@@ -163,7 +189,7 @@ class AiProposalService:
             except AiProposalValidationError as exc:
                 rejected_count += 1
                 warning_count += len(proposal_warnings)
-                errors.append(f"{proposal.external_proposal_id}: {exc}")
+                errors.append(compact_error(f"{proposal.external_proposal_id}: {exc}"))
                 item_id = self.repository.record_item(
                     batch_id=batch_id,
                     document_id=document_id,
@@ -183,7 +209,7 @@ class AiProposalService:
             except Exception as exc:
                 rejected_count += 1
                 warning_count += len(proposal_warnings)
-                errors.append(f"{proposal.external_proposal_id}: persistence failed: {exc}")
+                errors.append(compact_error(f"{proposal.external_proposal_id}: persistence failed: {exc}"))
                 item_id = self.repository.record_item(
                     batch_id=batch_id,
                     document_id=document_id,
@@ -240,6 +266,33 @@ class AiProposalService:
             warning_count=batch["warning_count"],
             action_item_ids=action_item_ids,
             errors=[],
+        )
+
+    def _result_from_existing_batch_or_conflict(
+        self,
+        batch: dict[str, Any],
+        *,
+        raw_response_sha256: str,
+        idempotency_key: str,
+    ) -> AiProposalIngestResult:
+        if batch["raw_response_sha256"] == raw_response_sha256:
+            return self._result_from_existing_batch(batch)
+        conflict = AiProposalIdempotencyConflict(
+            idempotency_key=idempotency_key,
+            existing_batch_id=batch["id"],
+        )
+        return AiProposalIngestResult(
+            batch_id="",
+            received_count=0,
+            accepted_count=0,
+            rejected_count=1,
+            duplicate_count=0,
+            warning_count=0,
+            action_item_ids=[],
+            errors=[compact_error(str(conflict))],
+            error_code=conflict.error_code,
+            idempotency_key=conflict.idempotency_key,
+            existing_batch_id=conflict.existing_batch_id,
         )
 
     def _build_action_item(

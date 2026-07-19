@@ -28,8 +28,8 @@ Every proposal must include:
 - priority and complexity
 - confidence from `0.0` to `1.0`
 - citation list with attachment id, page range, excerpt, and optional character range
-- short `reasoning_summary`
-- warnings for missing or uncertain fields
+- short `reasoning_summary`, capped at 1,000 characters
+- warnings for missing or uncertain fields, capped at 10 warnings per proposal and 500 characters per warning
 
 ## Output Rules
 
@@ -40,6 +40,7 @@ Every proposal must include:
 - Do not invent ids for people or units when uncertain; use `null` and a warning.
 - Do not include hashes; Canonical recomputes citation hashes.
 - Do not include API tokens, cookies, or credentials.
+- Do not include more than 20 envelope warnings or more than 10 warnings on any proposal.
 
 ## G04 Boundary
 

@@ -5,8 +5,12 @@ import sqlite3
 from typing import Any
 
 from .ai_proposal_models import (
+    MAX_ERROR_LENGTH,
+    MAX_WARNING_LENGTH,
     ProposalDedupeStatus,
     ProposalPersistStatus,
+    compact_error,
+    compact_warning,
     new_batch_id,
     now_for_ai_proposal,
 )
@@ -233,6 +237,8 @@ class AiProposalRepository:
         error_message: str | None,
     ) -> str:
         item_id = new_batch_id()
+        bounded_warnings = [compact_warning(warning) for warning in warnings[:]]
+        bounded_error = compact_error(error_message) if error_message else None
         with self.conn:
             self.conn.execute(
                 """
@@ -254,9 +260,9 @@ class AiProposalRepository:
                     title,
                     normalized_title,
                     confidence,
-                    json.dumps(warnings, ensure_ascii=False),
+                    json.dumps(bounded_warnings, ensure_ascii=False),
                     error_code,
-                    error_message,
+                    bounded_error,
                     now_for_ai_proposal(),
                 ),
             )
@@ -270,6 +276,8 @@ class AiProposalRepository:
         warning_code: str,
         message: str,
     ) -> None:
+        bounded_code = compact_warning(warning_code)[:MAX_WARNING_LENGTH]
+        bounded_message = compact_warning(message)
         with self.conn:
             self.conn.execute(
                 """
@@ -281,8 +289,8 @@ class AiProposalRepository:
                     new_batch_id(),
                     batch_id,
                     proposal_item_id,
-                    warning_code,
-                    message,
+                    bounded_code,
+                    bounded_message,
                     now_for_ai_proposal(),
                 ),
             )

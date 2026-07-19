@@ -27,7 +27,7 @@ flowchart LR
 
 ## Validation
 
-The parser accepts only a JSON object matching the G04 envelope. In strict mode, unknown fields are rejected. Missing fields are not inferred. Invalid schema version, invalid due date, unsupported enum values, excessive payload length, excessive proposal/citation counts, and confidence outside `0.0..1.0` are rejected.
+The parser accepts only a JSON object matching the G04 envelope. In strict mode, unknown fields are rejected. Missing fields are not inferred. Invalid schema version, invalid due date, unsupported enum values, excessive payload length, excessive proposal/citation counts, excessive warning counts, overlong warnings, and confidence outside `0.0..1.0` are rejected.
 
 AI output cannot set `APPROVED`, `SYNC_PENDING`, `SYNCED`, or `SYNCING`. New action items are always persisted as `PROPOSED`.
 
@@ -66,7 +66,9 @@ Migration `g04_ai_proposal_schema_1` creates:
 
 Batch metadata includes model name/version, prompt version, generated time, counts, status, and a stable SHA-256 of the response. Raw response body and tokens are not stored.
 
-ActionItem and SourceCitation inserts occur in one SQLite transaction per proposal. If citation insertion fails, the action item insert for that proposal is rolled back. Reusing the same idempotency key returns the existing batch and does not create duplicates.
+ActionItem and SourceCitation inserts occur in one SQLite transaction per proposal. If citation insertion fails, the action item insert for that proposal is rolled back. Reusing the same idempotency key with the same `raw_response_sha256` returns the existing batch and does not create duplicates. Reusing the same idempotency key with a different response returns `IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD` with the idempotency key and existing batch id, without storing raw response content or creating action items. If concurrent inserts race on the database unique constraint, G04 rereads the winning batch and applies the same hash comparison.
+
+Warnings and internal errors are bounded before persistence so AI warnings and exception messages cannot create unbounded database text.
 
 ## Security
 

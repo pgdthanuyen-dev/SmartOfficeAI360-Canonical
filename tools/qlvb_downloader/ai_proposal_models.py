@@ -17,6 +17,12 @@ MAX_AI_PROPOSAL_CITATIONS = 10
 MAX_AI_PROPOSAL_EXCERPT_CHARS = 2000
 MAX_AI_PROPOSAL_REASONING_CHARS = 1000
 MAX_AI_PROPOSAL_WARNING_CHARS = 500
+MAX_WARNING_LENGTH = MAX_AI_PROPOSAL_WARNING_CHARS
+MAX_ERROR_LENGTH = 1000
+MAX_REASONING_SUMMARY_LENGTH = MAX_AI_PROPOSAL_REASONING_CHARS
+MAX_WARNINGS_PER_ENVELOPE = 20
+MAX_WARNINGS_PER_PROPOSAL = 10
+IDEMPOTENCY_CONFLICT_ERROR_CODE = "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD"
 
 
 class ProposalDedupeStatus(StrEnum):
@@ -84,6 +90,9 @@ class AiProposalIngestResult(DomainModel):
     warning_count: int
     action_item_ids: list[str]
     errors: list[str]
+    error_code: str | None = None
+    idempotency_key: str | None = None
+    existing_batch_id: str | None = None
 
 
 def normalize_for_fingerprint(value: Any) -> str:
@@ -95,7 +104,11 @@ def normalize_for_fingerprint(value: Any) -> str:
 
 
 def compact_warning(value: str) -> str:
-    return normalize_for_fingerprint(value)[:MAX_AI_PROPOSAL_WARNING_CHARS]
+    return str(value or "").strip()[:MAX_WARNING_LENGTH]
+
+
+def compact_error(value: str) -> str:
+    return str(value or "").strip()[:MAX_ERROR_LENGTH]
 
 
 def proposal_fingerprint(document_id: str, proposal: AiProposal) -> str:

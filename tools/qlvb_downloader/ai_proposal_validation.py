@@ -13,6 +13,9 @@ from .ai_proposal_models import (
     MAX_AI_PROPOSAL_REASONING_CHARS,
     MAX_AI_PROPOSAL_TITLE_CHARS,
     MAX_AI_PROPOSALS,
+    MAX_WARNING_LENGTH,
+    MAX_WARNINGS_PER_ENVELOPE,
+    MAX_WARNINGS_PER_PROPOSAL,
     AiCitation,
     AiProposal,
     AiProposalEnvelope,
@@ -90,7 +93,13 @@ def validate_ai_proposal_envelope(payload: dict[str, Any], *, strict: bool = Tru
     _require(isinstance(proposals_payload, list), "proposals must be an array")
     _require(len(proposals_payload) <= MAX_AI_PROPOSALS, "too many proposals")
     proposals = [validate_ai_proposal(item, strict=strict) for item in proposals_payload]
-    warnings = _require_string_list(payload["warnings"], "warnings", allow_empty=True)
+    warnings = _require_string_list(
+        payload["warnings"],
+        "warnings",
+        allow_empty=True,
+        max_items=MAX_WARNINGS_PER_ENVELOPE,
+        max_chars=MAX_WARNING_LENGTH,
+    )
     return AiProposalEnvelope(
         schema_version=AI_PROPOSAL_SCHEMA_VERSION,
         document_id=document_id,
@@ -154,7 +163,13 @@ def validate_ai_proposal(payload: dict[str, Any], *, strict: bool = True) -> AiP
             "reasoning_summary",
             max_chars=MAX_AI_PROPOSAL_REASONING_CHARS,
         ),
-        warnings=_require_string_list(payload["warnings"], "warnings", allow_empty=True),
+        warnings=_require_string_list(
+            payload["warnings"],
+            "warnings",
+            allow_empty=True,
+            max_items=MAX_WARNINGS_PER_PROPOSAL,
+            max_chars=MAX_WARNING_LENGTH,
+        ),
     )
 
 
@@ -226,12 +241,23 @@ def _optional_string(value: Any, field_name: str, *, max_chars: int | None = Non
     return _require_string(value, field_name, max_chars=max_chars)
 
 
-def _require_string_list(value: Any, field_name: str, *, allow_empty: bool = False) -> list[str]:
+def _require_string_list(
+    value: Any,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+    max_items: int | None = None,
+    max_chars: int | None = None,
+) -> list[str]:
     _require(isinstance(value, list), f"{field_name} must be an array")
+    if max_items is not None:
+        _require(len(value) <= max_items, f"{field_name} contains too many items")
     if not allow_empty:
         _require(all(isinstance(item, str) and item.strip() for item in value), f"{field_name} must contain strings")
     else:
         _require(all(isinstance(item, str) for item in value), f"{field_name} must contain strings")
+    if max_chars is not None:
+        _require(all(len(item) <= max_chars for item in value), f"{field_name} item is too long")
     return list(value)
 
 
