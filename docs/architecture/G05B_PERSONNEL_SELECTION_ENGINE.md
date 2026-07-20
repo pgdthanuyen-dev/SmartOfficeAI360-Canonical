@@ -111,7 +111,14 @@ an average; an unresolved result with no selection is 0.
 
 ## Substitution
 
-The engine considers a substitute only when no normal eligible candidate exists.
+The engine collects direct and substitute paths separately before canonicalizing
+each `(tenant_id, personnel_id, role_type)` identity. For the same identity, an
+eligible direct path always wins over a substitute path, independent of source
+or database order: it is non-substitute, is not capped at 80, and has neither
+`SUBSTITUTE_USED` nor substitution provenance. This precedence is not global:
+direct and substitute candidates for different personnel identities remain in
+the same deterministic ranking/conflict policy.
+
 The primary must have an effective primary role for the resolved unit. The
 substitute must be same-tenant, ACTIVE, have exactly one effective
 `PersonnelRecord` version at the reference date, be role/unit/domain eligible,
@@ -119,9 +126,8 @@ and be AVAILABLE. Personnel record boundaries are inclusive. No effective
 version produces `PERSONNEL_OUTSIDE_EFFECTIVE_DATE`; multiple overlapping ACTIVE
 versions produce `PERSONNEL_DIRECTORY_INCOMPLETE` and are never auto-selected.
 
-If a canonical identity is observed through both direct and substitute paths,
-the eligible direct candidate wins: it remains non-substitute, has no score cap,
-and has no `SUBSTITUTE_USED` warning. An eligible direct substitute has `is_substitute=true`,
+If no eligible direct path exists for an identity but a substitute path does,
+the canonical result remains an eligible direct substitute with `is_substitute=true`,
 `SUBSTITUTE_USED`, decision at most `SELECTED_WITH_WARNING`, and score capped at
 80.
 

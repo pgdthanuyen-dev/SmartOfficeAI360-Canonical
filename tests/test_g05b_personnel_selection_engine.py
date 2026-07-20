@@ -54,7 +54,7 @@ def test_direct_substitute_is_capped_and_primary_wins_when_eligible():
  c,r,p=_engine();u=r.get_unit(p.primary_unit_id)
  q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19')
  r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD_EXECUTOR',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
- backup=PersonnelRecord('t','B',1,'Backup',primary_unit_id=u['id']);r.create_personnel(backup)
+ backup=PersonnelRecord('t','B',1,'Backup');r.create_personnel(backup)
  r.add_role_assignment(PersonnelRoleAssignment('t',backup.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD_EXECUTOR',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',backup.id,'D',ResponsibilityLevel.PRIMARY))
  r.add_substitution(PersonnelSubstitution('t',p.id,backup.id,RuleRoleType.LEAD_EXECUTOR,unit_id=u['id'],status=SubstitutionStatus.ACTIVE))
  assert PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0].selected_personnel_id==p.id
@@ -64,22 +64,22 @@ def test_direct_substitute_is_capped_and_primary_wins_when_eligible():
 
 def test_substitution_chain_and_cycle_are_guarded():
  c,r,a=_engine();u=r.get_unit(a.primary_unit_id);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19')
- b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d)
  for p in (a,b,d): r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'R',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');_availability(c,b,'LEAVE');_sub(c,a,b,u['id']);_sub(c,b,d,u['id'])
  out=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0];assert out.selected_personnel_id is None and 'SUBSTITUTION_CHAIN_UNSUPPORTED' in out.warnings
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);r.create_personnel(b)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');r.create_personnel(b)
  for p in (a,b):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'R',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');_sub(c,a,b,u['id']);_sub(c,b,a,u['id'])
  out=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0];assert out.selected_personnel_id is None and 'SUBSTITUTION_CYCLE_DETECTED' in out.warnings
 
 def test_multiple_direct_substitutes_conflict_or_choose_deterministically():
  c,r,a=_engine();u=r.get_unit(a.primary_unit_id);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19')
- b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d)
  for p in (a,b,d):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'R',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');_sub(c,a,b,u['id']);_sub(c,a,d,u['id']);out=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0]
  assert out.decision.value=='CONFLICT' and out.selected_personnel_id is None and len(out.alternative_candidates)==2 and {'PERSONNEL_CONFLICT','MULTIPLE_TOP_PERSONNEL'}.issubset(out.warnings)
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d)
  for p,primary,level in ((a,True,ResponsibilityLevel.PRIMARY),(b,True,ResponsibilityLevel.PRIMARY),(d,False,ResponsibilityLevel.SUPPORT)):
   r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'R',is_primary=primary));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',level))
  _availability(c,a,'LEAVE');_sub(c,a,d,u['id']);_sub(c,a,b,u['id']);out=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0]
@@ -97,7 +97,7 @@ def test_two_point_three_point_and_above_boundary_conflicts():
 
 def test_ineligible_high_score_substitutes_do_not_conflict_with_valid_lower():
  c,r,a=_engine();u=r.get_unit(a.primary_unit_id);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19')
- valid=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);bad=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);r.create_personnel(valid);r.create_personnel(bad)
+ valid=PersonnelRecord('t','C',1,'C');bad=PersonnelRecord('t','B',1,'B');r.create_personnel(valid);r.create_personnel(bad)
  for p in (a,valid,bad):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'R',is_primary=True))
  r.add_domain_assignment(PersonnelDomainAssignment('t',valid.id,'D',ResponsibilityLevel.SUPPORT));_availability(c,a,'LEAVE');_sub(c,a,valid,u['id']);_sub(c,a,bad,u['id'])
  out=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0]
@@ -178,7 +178,7 @@ def test_required_role_completeness_and_co_executor_zero_policy():
  out=PersonnelSelectionEngine(r).evaluate(q);assert [x.role_type for x in out.role_recommendations]==[RuleRoleType.LEADER,RuleRoleType.LEAD_EXECUTOR,RuleRoleType.CO_EXECUTOR] and set(out.unresolved_roles)=={RuleRoleType.LEAD_EXECUTOR,RuleRoleType.CO_EXECUTOR} and out.overall_confidence==75
 
 def test_co_executor_direct_substitute_is_capped_without_conflict():
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d)
  for p in (a,b,d):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.CO_EXECUTOR,'C',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');_sub(c,a,b,u['id'],RuleRoleType.CO_EXECUTOR);_sub(c,a,d,u['id'],RuleRoleType.CO_EXECUTOR)
  q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',2)
@@ -191,7 +191,7 @@ def test_co_executor_shortfall_remains_unresolved_after_partial_selection():
  assert rec.selected_personnel_ids==[a.id] and {'CO_EXECUTOR_COUNT_SHORTFALL','REQUIRED_ROLE_UNRESOLVED'}.issubset(rec.warnings) and RuleRoleType.CO_EXECUTOR in out.unresolved_roles
 
 def _co_executor_case(primary_status='ACTIVE', primary_available=True):
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);r.create_personnel(b)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');r.create_personnel(b)
  for p in (a,b):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.CO_EXECUTOR,'C',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  if primary_status != 'ACTIVE':c.execute('UPDATE personnel_records SET status=? WHERE id=?',(primary_status,a.id));c.commit()
  if not primary_available:_availability(c,a,'LEAVE')
@@ -199,7 +199,7 @@ def _co_executor_case(primary_status='ACTIVE', primary_available=True):
  return c,r,a,b,u,PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',1)
 
 def _co_executor_chain_case(backup_available=False):
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d)
  for p in (a,b,d):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.CO_EXECUTOR,'C',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE')
  if not backup_available:_availability(c,b,'LEAVE')
@@ -224,10 +224,11 @@ def test_co_executor_chain_uses_valid_direct_substitute_without_chain_warning():
 
 @pytest.mark.parametrize('edges',[('self',[('a','a')]),('two',[('a','b'),('b','a')]),('three',[('a','b'),('b','c'),('c','a')])])
 def test_co_executor_cycle_guard_is_deterministic(edges):
- _,pairs=edges;c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d);people={'a':a,'b':b,'c':d}
+ _,pairs=edges;c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B');d=PersonnelRecord('t','C',1,'C');r.create_personnel(b);r.create_personnel(d);people={'a':a,'b':b,'c':d}
  cycle_people={person for edge in pairs for person in edge}
  for key in cycle_people:
   p=people[key];r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],RuleRoleType.CO_EXECUTOR,'C',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE')
  for primary,substitute in pairs:_sub(c,people[primary],people[substitute],u['id'],RuleRoleType.CO_EXECUTOR)
  q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',1);first=PersonnelSelectionEngine(r).evaluate(q);second=PersonnelSelectionEngine(r).evaluate(q);rec=first.role_recommendations[0]
  assert not rec.selected_personnel_ids and {'SUBSTITUTION_CYCLE_DETECTED','CO_EXECUTOR_COUNT_SHORTFALL','REQUIRED_ROLE_UNRESOLVED'}.issubset(rec.warnings) and RuleRoleType.CO_EXECUTOR in first.unresolved_roles and first==second
@@ -260,7 +261,7 @@ def test_co_executor_chain_and_cycle_never_persist_an_unselected_person_as_selec
  assert not [row for row in rows if row['personnel_id'] in people and row['decision'] in ('SELECTED','SELECTED_WITH_WARNING')]
 
 def _temporal_substitute(role=RuleRoleType.LEAD_EXECUTOR,effective_from=None,effective_to=None):
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id'],effective_from=effective_from,effective_to=effective_to);r.create_personnel(b)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B',effective_from=effective_from,effective_to=effective_to);r.create_personnel(b)
  for p in (a,b):r.add_role_assignment(PersonnelRoleAssignment('t',p.id,u['id'],role,role.value,is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',p.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');r.add_substitution(PersonnelSubstitution('t',a.id,b.id,role,unit_id=u['id'],status=SubstitutionStatus.ACTIVE))
  return c,r,a,b,u,PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[role],['D'],[],'2026-07-19',1 if role==RuleRoleType.CO_EXECUTOR else 0)
@@ -288,7 +289,7 @@ def test_canonicalization_prefers_direct_candidate_and_is_independent_of_source_
  assert first==second and len(first)==1 and not first[0].is_substitute and first[0].score==100 and first[0].warnings==[]
 
 def test_multiple_substitution_rows_for_one_person_yield_one_substitute_candidate():
- c,r,a=_engine();u=r.get_unit(a.primary_unit_id);cprimary=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);b=PersonnelRecord('t','B',1,'B',primary_unit_id=u['id']);r.create_personnel(cprimary);r.create_personnel(b)
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);cprimary=PersonnelRecord('t','C',1,'C',primary_unit_id=u['id']);b=PersonnelRecord('t','B',1,'B');r.create_personnel(cprimary);r.create_personnel(b)
  for person in (a,cprimary,b):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',person.id,'D',ResponsibilityLevel.PRIMARY))
  _availability(c,a,'LEAVE');_availability(c,cprimary,'LEAVE');_sub(c,a,b,u['id']);_sub(c,cprimary,b,u['id'])
  q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19');engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0]
@@ -303,8 +304,8 @@ def test_substitute_personnel_effective_date_boundaries_are_inclusive(effective_
   diagnostics=[item for item in engine.all_evaluations if item.personnel_id==b.id];assert diagnostics and diagnostics[0].warnings==['PERSONNEL_OUTSIDE_EFFECTIVE_DATE'] and 'SUBSTITUTE_USED' not in diagnostics[0].warnings and RuleRoleType.LEAD_EXECUTOR in out.unresolved_roles
 
 def test_substitute_version_gap_and_overlap_are_not_auto_selected():
- c,r,a,b,u,q=_temporal_substitute(effective_to='2026-07-18');future=PersonnelRecord('t','B',2,'B future',primary_unit_id=u['id'],effective_from='2026-07-20');r.create_personnel(future);out=PersonnelSelectionEngine(r).evaluate(q);assert out.role_recommendations[0].selected_personnel_id is None
- c,r,a,b,u,q=_temporal_substitute();overlap=PersonnelRecord('t','B',2,'B overlap',primary_unit_id=u['id']);r._insert_personnel(overlap);c.commit();engine=PersonnelSelectionEngine(r);out=engine.evaluate(q);diagnostics=[item for item in engine.all_evaluations if item.personnel_id==b.id]
+ c,r,a,b,u,q=_temporal_substitute(effective_to='2026-07-18');future=PersonnelRecord('t','B',2,'B future',effective_from='2026-07-20');r.create_personnel(future);out=PersonnelSelectionEngine(r).evaluate(q);assert out.role_recommendations[0].selected_personnel_id is None
+ c,r,a,b,u,q=_temporal_substitute();overlap=PersonnelRecord('t','B',2,'B overlap');r._insert_personnel(overlap);c.commit();engine=PersonnelSelectionEngine(r);out=engine.evaluate(q);diagnostics=[item for item in engine.all_evaluations if item.personnel_id==b.id]
  assert out.role_recommendations[0].selected_personnel_id is None and diagnostics and diagnostics[0].warnings==['PERSONNEL_DIRECTORY_INCOMPLETE']
 
 @pytest.mark.parametrize('role',[RuleRoleType.LEADER,RuleRoleType.MONITOR,RuleRoleType.LEAD_EXECUTOR,RuleRoleType.CO_EXECUTOR])
@@ -316,3 +317,43 @@ def test_temporally_ineligible_substitute_is_not_persisted_as_selected():
  c,r,a,b,u,q=_temporal_substitute(effective_from='2026-07-20');doc=Document(tenant_id='t',source_system='fake',source_document_id='future-sub');DomainRepository(c).save_document(doc);q.document_id=doc.id
  PersonnelSelectionEngine(r).evaluate(q,True);rows=r.list_selection_matches_for_document(doc.id,'1')
  assert not [row for row in rows if row['personnel_id']==b.id and row['decision'] in ('SELECTED','SELECTED_WITH_WARNING')] and [row for row in rows if row['personnel_id']==b.id and row['warnings_json']=='["PERSONNEL_OUTSIDE_EFFECTIVE_DATE"]']
+
+def _direct_and_substitute_identity(substitution_first=False):
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B direct',primary_unit_id=u['id']);r.create_personnel(b)
+ r.add_role_assignment(PersonnelRoleAssignment('t',a.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',a.id,'D',ResponsibilityLevel.PRIMARY));_availability(c,a,'LEAVE')
+ if substitution_first:_sub(c,a,b,u['id'])
+ for code in ('DIRECT-A','DIRECT-B'):r.add_role_assignment(PersonnelRoleAssignment('t',b.id,u['id'],RuleRoleType.LEAD_EXECUTOR,code,is_primary=True))
+ for domain in ('D','D2'):r.add_domain_assignment(PersonnelDomainAssignment('t',b.id,domain,ResponsibilityLevel.PRIMARY))
+ if not substitution_first:_sub(c,a,b,u['id'])
+ q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D','D2'],[],'2026-07-19')
+ return c,r,a,b,u,q
+
+@pytest.mark.parametrize('substitution_first',[False,True])
+def test_direct_candidate_precedes_same_identity_substitute_independent_of_insert_order(substitution_first):
+ c,r,a,b,u,q=_direct_and_substitute_identity(substitution_first);engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0];evaluations=[item for item in engine.all_evaluations if item.personnel_id==b.id]
+ assert rec.selected_personnel_id==b.id and rec.confidence==100 and rec.warnings==[] and len(evaluations)==1 and not evaluations[0].is_substitute and evaluations[0].score==100 and evaluations[0].warnings==[] and evaluations[0].matched_role_codes==['DIRECT-A','DIRECT-B'] and evaluations[0].matched_domain_codes==['D','D2']
+
+def test_direct_precedence_persists_one_uncapped_non_substitute_row():
+ c,r,a,b,u,q=_direct_and_substitute_identity(True);doc=Document(tenant_id='t',source_system='fake',source_document_id='direct-precedence');DomainRepository(c).save_document(doc);q.document_id=doc.id
+ PersonnelSelectionEngine(r).evaluate(q,True);rows=[row for row in r.list_selection_matches_for_document(doc.id,'1') if row['personnel_id']==b.id]
+ assert len(rows)==1 and rows[0]['score']==100 and rows[0]['decision']=='SELECTED' and rows[0]['warnings_json']=='[]'
+
+def test_ineligible_direct_path_retains_substitute_only_cap_and_warning():
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B substitute only');r.create_personnel(b)
+ for person in (a,b):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',person.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE');_sub(c,a,b,u['id']);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D'],[],'2026-07-19');engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0];evaluation=[item for item in engine.all_evaluations if item.personnel_id==b.id][0]
+ assert rec.selected_personnel_id==b.id and rec.confidence==80 and rec.warnings==['SUBSTITUTE_USED'] and evaluation.is_substitute and evaluation.score==80
+
+def test_direct_precedence_is_not_global_between_different_personnel_identities():
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);direct=PersonnelRecord('t','C',1,'Direct',primary_unit_id=u['id']);substitute=PersonnelRecord('t','B',1,'Substitute');r.create_personnel(direct);r.create_personnel(substitute)
+ for person,primary in ((a,True),(substitute,True),(direct,False)):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.MONITOR,'MONITOR',is_primary=primary))
+ r.add_domain_assignment(PersonnelDomainAssignment('t',substitute.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE');_sub(c,a,substitute,u['id'],RuleRoleType.MONITOR);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.MONITOR],['D'],[],'2026-07-19');rec=PersonnelSelectionEngine(r).evaluate(q).role_recommendations[0]
+ assert rec.selected_personnel_id==substitute.id and rec.confidence==80 and rec.warnings==['SUBSTITUTE_USED'] and [item.personnel_id for item in rec.alternative_candidates]==[direct.id]
+
+def test_co_executor_same_identity_direct_and_substitute_is_selected_once():
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);b=PersonnelRecord('t','B',1,'B direct',primary_unit_id=u['id']);d=PersonnelRecord('t','C',1,'C direct',primary_unit_id=u['id']);r.create_personnel(b);r.create_personnel(d)
+ for person in (a,b,d):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.CO_EXECUTOR,'CO',is_primary=True));r.add_domain_assignment(PersonnelDomainAssignment('t',person.id,'D',ResponsibilityLevel.PRIMARY))
+ _availability(c,a,'LEAVE');_sub(c,a,b,u['id'],RuleRoleType.CO_EXECUTOR);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',2);engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0]
+ evaluations=[item for item in engine.all_evaluations if item.personnel_id==b.id and item.role_type==RuleRoleType.CO_EXECUTOR]
+ assert rec.selected_personnel_ids==[b.id,d.id] and len(set(rec.selected_personnel_ids))==2 and len(evaluations)==1 and not evaluations[0].is_substitute and evaluations[0].warnings==[]

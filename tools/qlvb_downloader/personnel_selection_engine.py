@@ -50,8 +50,9 @@ class PersonnelSelectionEngine:
         role_order={RuleRoleType.LEADER:0,RuleRoleType.MONITOR:1,RuleRoleType.LEAD_EXECUTOR:2,RuleRoleType.CO_EXECUTOR:3}
         roles=sorted(set(request.required_roles),key=lambda role:role_order[role])
         for role in roles:
-            candidates=self.collect_candidates(request,unit,role)
-            if not candidates: candidates=self.resolve_substitute(request,unit,role)
+            direct_candidates=self.collect_candidates(request,unit,role)
+            substitute_candidates=self.resolve_substitute(request,unit,role)
+            candidates=self.rank_candidates([*direct_candidates,*substitute_candidates])
             if role==RuleRoleType.CO_EXECUTOR: candidates=[candidate for candidate in candidates if candidate.personnel_id not in selected_ids]
             rec=self.select_for_role(role,candidates,request.requested_co_executor_count)
             if not candidates and getattr(self, 'substitution_warnings', []):
@@ -73,10 +74,8 @@ class PersonnelSelectionEngine:
         warnings=['REQUIRED_ROLE_UNRESOLVED'] if unresolved else []
         return PersonnelSelectionRecommendation(request.document_id,request.document_revision,request.assignment_rule_match_id,unit['id'],unit['source_unit_key'],recs,sorted(set(unresolved),key=lambda role:role_order[role]),sorted(set(conflicts),key=lambda role:role_order[role]),overall,warnings,'personnel proposal only',fp)
     def collect_candidates(self, req, unit, role):
-        substitute_ids={row['substitute_personnel_id'] for row in self.repository.conn.execute("SELECT substitute_personnel_id FROM personnel_substitutions WHERE tenant_id=? AND role_type=? AND status='ACTIVE' AND (unit_id IS NULL OR unit_id=?) AND (effective_from IS NULL OR effective_from<=?) AND (effective_to IS NULL OR effective_to>=?)",(req.tenant_id,role.value,unit['id'],req.reference_date,req.reference_date)).fetchall()}
         raw=[]
         for person in self.repository.list_active_personnel(req.tenant_id,req.reference_date):
-            if person['id'] in substitute_ids: continue
             if person['primary_unit_id']!=unit['id']: continue
             for ra in self.repository.list_role_assignments(personnel_id=person['id'],role_type=role.value,as_of_date=req.reference_date):
                 if ra['unit_id']!=unit['id']: continue
