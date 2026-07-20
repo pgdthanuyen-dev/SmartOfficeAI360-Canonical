@@ -127,13 +127,18 @@ require business approval.
 |---|---|---|---:|---:|
 | `PENDING_OFFICE_REVIEW` | G05C system | hard validation passed | no | yes, Office |
 | `NEEDS_REVISION` | Office | material review issue | no | yes |
-| `APPROVED_FOR_PLANNER` | authorized Office/leadership role | review requirements complete | no | new version for material edit |
+| `APPROVED_FOR_PLANNER` | Office reviewer or authorized workflow administrator | review requirements complete | terminal in G05C | new version for material edit |
 | `REJECTED` | authorized reviewer | reason recorded | yes | no |
 | `SUPERSEDED` | system/reviewer | successor references it | yes | no |
 | `CANCELLED` | authorized reviewer | reason recorded | yes | no |
 
-No Planner runtime state belongs in G05C. A material edit after approval creates
-a new version and links `supersedes_draft_id`; it never overwrites history.
+SmartOfficeAI360 does not replace leadership approval, but no separate
+leadership-approval state is required before the Office moves a draft to
+`APPROVED_FOR_PLANNER`. This state means only that a later module may prepare a
+Planner payload; it does not mean a Planner task exists. No Planner runtime state
+belongs in G05C. A material edit after approval creates a new
+`PENDING_OFFICE_REVIEW` version and links `supersedes_draft_id`; it never
+overwrites history.
 
 ```mermaid
 stateDiagram-v2
@@ -150,14 +155,18 @@ stateDiagram-v2
 
 Hard validation prevents creation only for missing tenant id, missing source
 document id, invalid source identity, schema-invalid payload, security-limit
-violation, invalid source fingerprint, or an idempotency collision that cannot
-be classified.
+violation, invalid source fingerprint, payload that cannot be normalized safely,
+or an idempotency collision that cannot be classified.
 
 Soft validation still creates `PENDING_OFFICE_REVIEW` with warnings for missing
 handler/co-executor, personnel or unit conflict, missing due date/output,
 unavailable or substitute personnel, low confidence, missing file reference, or
-incomplete summary. Missing personnel must never block a draft. A due date before
-received date is a soft warning pending an approved exception policy.
+incomplete summary. Missing personnel and substitute personnel must never block a
+draft. Due-date precedence is: an explicit document date, an extracted normalized
+content date, then Office entry or adjustment. If no date is known, emit
+`DUE_DATE_REVIEW_REQUIRED` and keep `PENDING_OFFICE_REVIEW`; no fixed default is
+invented. A due date before received or proposed start date emits
+`INVALID_PROPOSED_DUE_DATE` without silent correction.
 
 ## 9. Confidence and Warning Policy
 
@@ -167,6 +176,11 @@ and deliverable confidence. Missing required component confidence is 0.
 ```text
 overall_confidence = MIN(required component confidences)
 ```
+
+Priority defaults to `NORMAL`. `HIGH` or `URGENT` is proposed only where document
+content or metadata explicitly indicates urgent handling, such as urgent terms,
+special short handling time, or immediate direction. Low confidence or missing
+personnel never implies urgency. Office may override priority.
 
 Each warning has a deterministic code, severity, scope, optional role/field,
 short message, source engine, and recommended review action. Proposed bounds are
@@ -191,6 +205,12 @@ Office may edit task title/description, lead/participating units, leader,
 monitor, lead executor, co-executors, due date, priority, deliverables,
 checklist, milestones, and notes.
 
+AI proposes deliverables, checklist items, and milestones; Office may add,
+edit, delete, and reorder them. Missing deliverables emits
+`DELIVERABLE_REVIEW_REQUIRED` but does not block the one-document/one-draft
+rule. Multiple document requirements remain checklist, deliverable, or milestone
+items in the same draft and are never auto-split into tasks.
+
 Each override proposes an append-only audit item:
 `field`, `value_before`, `value_after`, `changed_by`, `changed_at`,
 `reason`, and source `AI_PROPOSAL` or `OFFICE_OVERRIDE`. Audit never stores
@@ -198,7 +218,14 @@ user authentication material.
 
 ## 12. Security and Determinism
 
-All text, lists, and file placeholders are bounded. Reject tokens, cookies,
+All text, lists, and file placeholders are bounded. Initial contract limits are
+20 deliverables, 50 checklist items, 20 milestones, 20 participating units, 30
+co-executors, and 50 warnings. Limits are 300 characters for task title, 10,000
+for task description, 1,000 per deliverable/checklist/milestone text, and 4,000
+for an Office note. An over-limit payload is a hard validation error with a
+clear code; it is never silently truncated.
+
+Reject tokens, cookies,
 authorization values, Planner payloads, SharePoint URL/id, local/UNC paths, raw
 SQL, stack traces, binary, and Base64. Cross-tenant identity is a hard failure.
 
@@ -214,7 +241,7 @@ generated database id, display name, or database insertion order.
 | 3. Handler exists, leader missing | PENDING_OFFICE_REVIEW | soft | yes | assign leader |
 | 4. Personnel conflict | PENDING_OFFICE_REVIEW | soft | yes | resolve role conflict |
 | 5. Unit conflict | PENDING_OFFICE_REVIEW | soft | yes | choose lead unit |
-| 6. Substitute only | PENDING_OFFICE_REVIEW | soft | yes | confirm substitute |
+| 6. Substitute only | PENDING_OFFICE_REVIEW | soft | yes | confirm substitute; it is optional |
 | 7. Proposed person unavailable | PENDING_OFFICE_REVIEW | soft | yes | replace person |
 | 8. Due date unknown | PENDING_OFFICE_REVIEW | soft | yes | enter due date |
 | 9. Due date before received date | PENDING_OFFICE_REVIEW | soft | yes | confirm exception |
@@ -229,10 +256,10 @@ generated database id, display name, or database insertion order.
 | 18. Token/path/URL sensitive value | none | hard | no | reject payload |
 | 19. Cross-tenant payload | none | hard | no | reject payload |
 | 20. Many document requests | PENDING_OFFICE_REVIEW | soft clean | yes | checklist/deliverables |
-| 21. Withdrawn document | CANCELLED proposal | business policy | no new | confirm withdrawal |
-| 22. Replacement document | SUPERSEDED proposal | business policy | yes | link successor |
+| 21. Withdrawn document | CANCELLED | business policy | no new | audit `SOURCE_DOCUMENT_WITHDRAWN` |
+| 22. Replacement document | SUPERSEDED | business policy | yes | link successor/new draft |
 | 23. Urgent deadline | PENDING_OFFICE_REVIEW | soft clean | yes | prioritize review |
-| 24. No task for local unit | PENDING_OFFICE_REVIEW | soft | yes | Office decides scope |
+| 24. No task for local unit | REJECTED | business decision | no | audit `NO_ACTION_REQUIRED` |
 | 25. Office must enter person | PENDING_OFFICE_REVIEW | soft | yes | manual override |
 
 ## 14. Components and Sequence
@@ -278,22 +305,45 @@ No production G05C engine, schema/migration, persistence, Planner/SharePoint
 call, Planner identity mapping, UI, Excel import, real-data ingestion, or task
 sync is included in this phase.
 
-## 17. Open Questions
+## 17. Resolved Business Decisions and Non-blocking Backlog
 
-1. Which Office or leadership roles may approve for Planner?
-2. What default deadline and priority policy applies?
-3. Who may edit after approval?
-4. How are withdrawal, replacement, and draft expiry confirmed?
-5. Is leadership approval mandatory before any Planner payload?
-6. Which documents must not create work for local units?
-7. How are deliverables and expected outputs verified?
-8. What checklist/deliverable/milestone/file limits are approved?
-9. What warning severity taxonomy and review SLA are approved?
+The nine Phase 0 business questions are resolved as follows:
+
+1. An Office reviewer or authorized workflow administrator may confirm a draft;
+   G05C does not require a separate leadership-approval state.
+2. Due dates use explicit-document, normalized-extraction, then Office-input
+   precedence. Priority defaults to `NORMAL` and elevation requires explicit
+   urgency.
+3. Material changes after approval create a new `PENDING_OFFICE_REVIEW` version
+   and supersede the approved version; historical versions remain immutable.
+4. A withdrawn source cancels an unhanded-off draft, replacement creates a
+   successor version, and V1 does not auto-expire drafts.
+5. Leadership approval is not mandatory before a future Planner payload. The
+   Office confirmation only authorizes payload preparation.
+6. A document requiring no local-unit action is rejected with
+   `NO_ACTION_REQUIRED`; it is not cancelled.
+7. Office may edit, reorder, add, or remove proposed deliverables, checklist
+   items, and milestones. Missing deliverables require review but do not block
+   the draft; multiple requirements remain in one draft without auto-splitting.
+8. Payload list and text limits in this contract are approved hard-validation
+   limits and must never be silently truncated.
+9. Bounded warning codes, messages, sources, and actions are part of the
+   contract. Exact review-SLA and notification timing are deferred without
+   blocking G05C.
+
+Non-blocking backlog:
+
+- review-SLA reminder policy using `DRAFT_REVIEW_OVERDUE`;
+- multi-channel notifications;
+- automatic Planner update after handoff;
+- runtime personnel reassignment; and
+- a future separate leadership-approval workflow.
 
 ## 18. Acceptance Criteria
 
-Before implementation, business owners must approve state authority, defaults,
-limits, lifecycle rules, and Planner handoff. G05C implementation must preserve
-one-document/one-draft, proposal-only behavior, hard versus soft validation,
-append-only versions/audit, deterministic fingerprints, and this security
-boundary.
+All decisions needed for G05C schema and engine planning are approved. G05C
+implementation must preserve one-document/one-draft, proposal-only behavior,
+hard versus soft validation, append-only versions/audit, deterministic
+fingerprints, and this security boundary. Non-blocking backlog items do not
+authorize implementation of Planner, notification, reassignment, or leadership
+workflow behavior.
