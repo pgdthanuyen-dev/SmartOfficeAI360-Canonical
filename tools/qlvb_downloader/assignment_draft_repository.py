@@ -14,6 +14,7 @@ from .personnel_directory_repository import init_personnel_directory_schema
 
 
 ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION = "g05c_assignment_draft_mvp_schema_1"
+ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION = "g05c_assignment_draft_review_events_1"
 MIGRATION_RUNTIME_ENTRYPOINT = "LIBRARY_ONLY"
 
 _SHA256_CHECK = "length({field}) = 64 AND {field} NOT GLOB '*[^0-9a-f]*'"
@@ -72,6 +73,19 @@ _CREATE_TABLES_SQL = [
         FOREIGN KEY(draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS assignment_draft_review_events (
+        id TEXT PRIMARY KEY,
+        draft_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL CHECK(length(trim(tenant_id)) > 0 AND length(tenant_id) <= 200),
+        event_type TEXT NOT NULL CHECK(event_type IN ('APPROVED_FOR_PLANNER', 'REJECTED', 'SUPERSEDED')),
+        reviewer_reference TEXT NOT NULL CHECK(length(trim(reviewer_reference)) > 0 AND length(reviewer_reference) <= 200),
+        reason TEXT CHECK(length(reason) <= 1000),
+        changes_json TEXT NOT NULL DEFAULT '{}' CHECK(length(changes_json) <= 16000 AND json_valid(changes_json)),
+        created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0 AND length(created_at) <= 64),
+        FOREIGN KEY(draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
+    );
+    """,
 ]
 
 _INDEXES_SQL = [
@@ -80,6 +94,7 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_assignment_drafts_content_fingerprint ON assignment_drafts(tenant_id, draft_content_fingerprint);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_draft_order ON assignment_draft_personnel(draft_id, item_order);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_source_key ON assignment_draft_personnel(tenant_id, personnel_source_key);",
+    "CREATE INDEX IF NOT EXISTS idx_assignment_draft_review_events_current ON assignment_draft_review_events(tenant_id, draft_id, created_at DESC, id DESC);",
 ]
 
 
@@ -96,6 +111,10 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION, utc_now_iso()),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        (ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION, utc_now_iso()),
     )
     conn.commit()
 
