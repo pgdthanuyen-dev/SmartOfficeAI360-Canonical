@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from .assignment_draft_models import AssignmentDraftCandidate, AssignmentDraftPersonnelProposal, AssignmentDraftWarning
@@ -26,6 +26,12 @@ _EDITABLE_FIELDS = frozenset({
 
 class AssignmentDraftReviewError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class AssignmentDraftReviewState:
+    status: str
+    reason: str | None
 
 
 class AssignmentDraftReviewService:
@@ -72,15 +78,19 @@ class AssignmentDraftReviewService:
         self._decision(tenant_id, draft_id, reviewer_reference, reason, REJECTED, required_reason=True)
 
     def get_current_review_status(self, tenant_id: str, draft_id: str) -> str | None:
+        state = self.get_current_review_state(tenant_id, draft_id)
+        return state.status if state else None
+
+    def get_current_review_state(self, tenant_id: str, draft_id: str) -> AssignmentDraftReviewState | None:
         draft = self.repository.get_draft_by_id(tenant_id, draft_id)
         if draft is None:
             return None
         row = self.connection.execute(
-            """SELECT event_type FROM assignment_draft_review_events
+            """SELECT event_type, reason FROM assignment_draft_review_events
                WHERE tenant_id=? AND draft_id=? ORDER BY created_at DESC, id DESC LIMIT 1""",
             (tenant_id, draft_id),
         ).fetchone()
-        return row["event_type"] if row else draft.initial_status
+        return AssignmentDraftReviewState(row["event_type"], row["reason"]) if row else AssignmentDraftReviewState(draft.current_status, None)
 
     def _decision(self, tenant_id: str, draft_id: str, reviewer_reference: str, reason: str | None,
                   event_type: str, required_reason: bool) -> None:

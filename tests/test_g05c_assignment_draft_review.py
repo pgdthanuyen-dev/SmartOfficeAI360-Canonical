@@ -69,6 +69,26 @@ def test_approve_and_reject_are_events_without_snapshot_update():
     assert service.get_current_review_status("tenant-a", draft.id) == "REJECTED"
 
 
+def test_review_state_exposes_current_status_and_rejection_reason():
+    _, draft, service = _saved_service()
+    assert service.get_current_review_state("tenant-a", draft.id).status == "PENDING_OFFICE_REVIEW"
+    service.reject_draft("tenant-a", draft.id, "OFFICE-1", "Needs Office clarification")
+    state = service.get_current_review_state("tenant-a", draft.id)
+    assert state.status == "REJECTED" and state.reason == "Needs Office clarification"
+
+
+def test_revision_excludes_superseded_snapshot_from_pending_list_and_keeps_tenants_isolated():
+    connection, old, service = _saved_service()
+    other = AssignmentDraftRepository(connection).save_draft_candidate(_candidate(tenant="tenant-b"))
+    revised = service.create_office_revision("tenant-a", old.id, "OFFICE-1", "revision", {"task_title": "Revised title"})
+    repository = AssignmentDraftRepository(connection)
+    assert [draft.id for draft in repository.list_pending_drafts("tenant-a")] == [revised.id]
+    assert repository.get_draft_by_id("tenant-a", old.id).current_status == "SUPERSEDED"
+    assert repository.get_draft_by_id("tenant-a", old.id).task_title == "Original title"
+    assert repository.get_draft_by_id("tenant-a", revised.id).current_status == "PENDING_OFFICE_REVIEW"
+    assert [draft.id for draft in repository.list_pending_drafts("tenant-b")] == [other.id]
+
+
 def test_rejection_reason_and_second_decision_are_rejected():
     _, draft, service = _saved_service()
     with pytest.raises(AssignmentDraftReviewError):

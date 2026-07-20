@@ -143,6 +143,7 @@ class StoredAssignmentDraft:
     source_identity_key: str
     draft_version: int
     initial_status: str
+    current_status: str
     task_title: str
     task_description: str
     lead_unit_source_key: str | None
@@ -212,6 +213,11 @@ class AssignmentDraftRepository:
             """
             SELECT * FROM assignment_drafts
             WHERE tenant_id=? AND initial_status='PENDING_OFFICE_REVIEW'
+              AND COALESCE((
+                  SELECT event_type FROM assignment_draft_review_events
+                  WHERE tenant_id=assignment_drafts.tenant_id AND draft_id=assignment_drafts.id
+                  ORDER BY created_at DESC, id DESC LIMIT 1
+              ), 'PENDING_OFFICE_REVIEW') = 'PENDING_OFFICE_REVIEW'
             ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
@@ -299,6 +305,11 @@ class AssignmentDraftRepository:
         )
 
     def _to_stored(self, row: sqlite3.Row) -> StoredAssignmentDraft:
+        status_row = self.connection.execute(
+            """SELECT event_type FROM assignment_draft_review_events
+               WHERE tenant_id=? AND draft_id=? ORDER BY created_at DESC, id DESC LIMIT 1""",
+            (row["tenant_id"], row["id"]),
+        ).fetchone()
         personnel_rows = self.connection.execute(
             """
             SELECT personnel_source_key, role_type, proposal_source, is_substitute, confidence, item_order
@@ -310,7 +321,8 @@ class AssignmentDraftRepository:
             id=row["id"], tenant_id=row["tenant_id"], source_system=row["source_system"],
             source_document_id=row["source_document_id"], source_revision=row["source_revision"],
             source_identity_key=row["source_identity_key"], draft_version=int(row["draft_version"]),
-            initial_status=row["initial_status"], task_title=row["task_title"], task_description=row["task_description"],
+            initial_status=row["initial_status"], current_status=status_row["event_type"] if status_row else row["initial_status"],
+            task_title=row["task_title"], task_description=row["task_description"],
             lead_unit_source_key=row["lead_unit_source_key"], proposed_start_date=row["proposed_start_date"],
             proposed_due_date=row["proposed_due_date"], priority=row["priority"],
             overall_confidence=float(row["overall_confidence"]), source_input_fingerprint=row["source_input_fingerprint"],
