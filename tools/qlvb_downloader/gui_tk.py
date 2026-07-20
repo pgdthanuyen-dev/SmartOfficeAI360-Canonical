@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 import customtkinter as ctk
 
 from tools.qlvb_downloader.config import QLVBConfig, load_config, save_config, VERSION
@@ -724,6 +724,40 @@ class ConfigApp(ctk.CTk):
             warnings = "\n".join(f"- {w.get('code', '')}" for w in draft.warnings) or "Không có"
             text.insert("1.0", f"Văn bản: {draft.source_document_id}\nPhiên bản: {draft.draft_version}\nTrạng thái: {draft.initial_status}\n\n{draft.task_title}\n\n{draft.task_description}\n\nĐơn vị: {draft.lead_unit_source_key or ''}\nThời hạn: {draft.proposed_due_date or ''}\nƯu tiên: {draft.priority}\nTin cậy: {draft.overall_confidence}\n\nNhân sự:\n{people}\n\nCảnh báo:\n{warnings}")
             text.configure(state="disabled")
+            controls = ctk.CTkFrame(window); controls.pack(fill="x", padx=16, pady=(0, 16))
+            service = AssignmentDraftService(str(self.cfg.root_path)); reviewer = "LOCAL_OFFICE"
+            def disable_actions():
+                for button in (edit_button, approve_button, reject_button): button.configure(state="disabled")
+            def revise():
+                title = simpledialog.askstring("Chỉnh sửa", "Tiêu đề nhiệm vụ:", initialvalue=draft.task_title, parent=window)
+                if title is None: return
+                due = simpledialog.askstring("Chỉnh sửa", "Thời hạn (YYYY-MM-DD):", initialvalue=draft.proposed_due_date or "", parent=window)
+                if due is None: return
+                reason = simpledialog.askstring("Lý do chỉnh sửa", "Lý do (không bắt buộc):", parent=window)
+                edits = {}
+                if title != draft.task_title: edits["task_title"] = title
+                if due != (draft.proposed_due_date or ""): edits["proposed_due_date"] = due or None
+                if not edits: return
+                try:
+                    service.revise_draft(tenant, draft.id, edits, reviewer, reason)
+                    messagebox.showinfo("Dự thảo giao việc", "Đã lưu phiên bản mới"); self.refresh_assignment_drafts(); window.destroy()
+                except AssignmentDraftServiceError as exc: messagebox.showerror("Dự thảo giao việc", str(exc))
+            def approve():
+                if not messagebox.askyesno("Xác nhận", "Xác nhận duyệt dự thảo để chuẩn bị gửi Planner KPI?", parent=window): return
+                try:
+                    service.approve_draft(tenant, draft.id, reviewer)
+                    messagebox.showinfo("Dự thảo giao việc", "Đã duyệt, sẵn sàng chuẩn bị gửi Planner KPI"); disable_actions(); self.refresh_assignment_drafts()
+                except AssignmentDraftServiceError as exc: messagebox.showerror("Dự thảo giao việc", str(exc))
+            def reject():
+                reason = simpledialog.askstring("Từ chối", "Lý do từ chối:", parent=window)
+                if not reason or not reason.strip(): messagebox.showwarning("Dự thảo giao việc", "Lý do từ chối là bắt buộc", parent=window); return
+                try:
+                    service.reject_draft(tenant, draft.id, reviewer, reason)
+                    messagebox.showinfo("Dự thảo giao việc", "Đã từ chối dự thảo"); disable_actions(); self.refresh_assignment_drafts()
+                except AssignmentDraftServiceError as exc: messagebox.showerror("Dự thảo giao việc", str(exc))
+            edit_button = ctk.CTkButton(controls, text="Chỉnh sửa", command=revise); edit_button.pack(side="left", padx=6, pady=8)
+            approve_button = ctk.CTkButton(controls, text="Duyệt để chuẩn bị gửi Planner", command=approve); approve_button.pack(side="left", padx=6, pady=8)
+            reject_button = ctk.CTkButton(controls, text="Từ chối", fg_color="#b22222", command=reject); reject_button.pack(side="left", padx=6, pady=8)
         except AssignmentDraftServiceError as exc: messagebox.showerror("Dự thảo giao việc", str(exc))
 
     def write_log(self, text: str):
