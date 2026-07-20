@@ -11,7 +11,9 @@ not approve a leader decision in SmartOfficeAI360, and does not create an
 Assignment Draft. Office staff review the proposal in Planner KPI; Planner
 identity mapping is not implemented. This phase does not call SharePoint or
 Planner, import Excel v1, use real operational data, or store document full text
-or chain-of-thought.
+or chain-of-thought. Office staff may change the proposed people, and a later
+Planner workflow may add or replace people after receipt; G05B has no runtime
+reassignment automation.
 
 G05A owns deterministic assignment-rule matching and the proposed lead unit.
 G05B owns the tenant-safe personnel/unit directory and this proposal engine. The
@@ -146,6 +148,12 @@ rows and never updates prior history. Batch insertion validates all matches and
 uses one SQLite transaction, so an insert failure rolls back that persistence
 operation. It does not modify directory records or G05A rule matches.
 
+For equivalent canonical input, the persisted business result (person/role,
+decision, score, canonical warnings, explanation, and fingerprint) is
+deterministic across insertion and database-row order. Database-generated match
+ids and timestamps are append-only audit fields and are intentionally not part
+of that equality comparison.
+
 The input fingerprint is canonical SHA-256 over engine version, tenant,
 document/revision, G05A match reference, unit source key, sorted unique role
 values, sorted unique domains/subdomains, and reference date. Ordering or
@@ -164,12 +172,12 @@ client.
 flowchart TD
     A[Selection request] --> B[Resolve one effective tenant unit]
     B -->|none or many| C[Unresolved unit recommendation]
-    B -->|one| D[Collect hard-filtered candidates]
-    D --> E{Eligible candidates?}
-    E -->|no| F[Evaluate direct substitutes]
-    F --> G[Guard chain and cycle]
-    E -->|yes| H[Rank deterministically]
-    G --> H
+    B -->|one| D[Collect direct candidates]
+    B -->|one| E[Collect direct substitutes]
+    D --> F[Canonicalize origin by identity]
+    E --> G[Guard chain and cycle]
+    G --> F
+    F --> H[Rank deterministically]
     H --> I[Apply role and CO_EXECUTOR policy]
     I --> J[Compute MIN overall confidence]
     J --> K{Persist matches?}

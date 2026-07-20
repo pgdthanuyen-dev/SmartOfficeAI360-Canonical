@@ -357,3 +357,40 @@ def test_co_executor_same_identity_direct_and_substitute_is_selected_once():
  _availability(c,a,'LEAVE');_sub(c,a,b,u['id'],RuleRoleType.CO_EXECUTOR);q=PersonnelSelectionRequest('t','d','1',None,'R','1',100,'U',[RuleRoleType.CO_EXECUTOR],['D'],[],'2026-07-19',2);engine=PersonnelSelectionEngine(r);rec=engine.evaluate(q).role_recommendations[0]
  evaluations=[item for item in engine.all_evaluations if item.personnel_id==b.id and item.role_type==RuleRoleType.CO_EXECUTOR]
  assert rec.selected_personnel_ids==[b.id,d.id] and len(set(rec.selected_personnel_ids))==2 and len(evaluations)==1 and not evaluations[0].is_substitute and evaluations[0].warnings==[]
+
+def _ordered_direct_substitute_snapshot(substitution_before_current=False,reverse_roles=False,reverse_domains=False,reverse_substitutions=False,current_before_old=False):
+ c,r,a=_engine();u=r.get_unit(a.primary_unit_id);backup_primary=PersonnelRecord('t','C',1,'Backup primary')
+ r.create_personnel(backup_primary);old=PersonnelRecord('t','B',1,'B old',effective_to='2026-07-18');current=PersonnelRecord('t','B',2,'B direct',primary_unit_id=u['id'],effective_from='2026-07-19')
+ if current_before_old:r.create_personnel(current);r.create_personnel(old)
+ else:r.create_personnel(old)
+ for person in (a,backup_primary):r.add_role_assignment(PersonnelRoleAssignment('t',person.id,u['id'],RuleRoleType.LEAD_EXECUTOR,'LEAD',is_primary=True))
+ _availability(c,a,'LEAVE');_availability(c,backup_primary,'LEAVE')
+ substitutions=[(a,old),(backup_primary,old)]
+ if reverse_substitutions:substitutions.reverse()
+ if substitution_before_current:
+  for primary,substitute in substitutions:_sub(c,primary,substitute,u['id'])
+ if not current_before_old:r.create_personnel(current)
+ roles=[('DIRECT-A',1),('DIRECT-B',5)]
+ domains=[('D1',2),('D2',7)]
+ if reverse_roles:roles.reverse()
+ if reverse_domains:domains.reverse()
+ for code,priority in roles:r.add_role_assignment(PersonnelRoleAssignment('t',current.id,u['id'],RuleRoleType.LEAD_EXECUTOR,code,is_primary=True,priority=priority))
+ for domain,priority in domains:r.add_domain_assignment(PersonnelDomainAssignment('t',current.id,domain,ResponsibilityLevel.PRIMARY,priority=priority))
+ if not substitution_before_current:
+  for primary,substitute in substitutions:_sub(c,primary,substitute,u['id'])
+ doc=Document(tenant_id='t',source_system='fake',source_document_id='ordered-direct-substitute',id='ordered-direct-substitute');DomainRepository(c).save_document(doc);q=PersonnelSelectionRequest('t',doc.id,'1',None,'R','1',100,'U',[RuleRoleType.LEAD_EXECUTOR],['D1','D2'],[],'2026-07-19');engine=PersonnelSelectionEngine(r);out=engine.evaluate(q,True);rec=out.role_recommendations[0]
+ source=lambda personnel_id:r.get_personnel(personnel_id)['source_person_key'] if personnel_id else None
+ recommendation=(rec.selected_source_person_key,[source(personnel_id) for personnel_id in rec.selected_personnel_ids],rec.decision.value,rec.confidence,rec.warnings,rec.explanation,[(candidate.source_person_key,candidate.score,candidate.is_substitute,candidate.warnings,candidate.explanation) for candidate in rec.alternative_candidates],[role.value for role in out.unresolved_roles],[role.value for role in out.conflicting_roles])
+ evaluations=sorted((item.source_person_key,item.role_type.value,item.score,item.decision.value,item.is_substitute,item.warnings,item.explanation,item.matched_role_codes,item.matched_domain_codes) for item in engine.all_evaluations)
+ matches=sorted((source(row['personnel_id']),row['role_type'],row['decision'],row['score'],row['warnings_json'],row['explanation'],row['input_fingerprint']) for row in r.list_selection_matches_for_document(doc.id,'1'))
+ return recommendation,evaluations,matches
+
+def test_direct_substitute_recommendation_and_persistence_are_insert_order_independent():
+ snapshots=[_ordered_direct_substitute_snapshot(**variant) for variant in (
+  {},{'substitution_before_current':True},{'reverse_roles':True},{'reverse_domains':True},{'reverse_substitutions':True},{'current_before_old':True},{'substitution_before_current':True,'reverse_roles':True,'reverse_domains':True,'reverse_substitutions':True,'current_before_old':True})]
+ assert all(snapshot==snapshots[0] for snapshot in snapshots)
+ recommendation,evaluations,matches=snapshots[0]
+ assert recommendation[0]=='B' and recommendation[2]=='SELECTED' and recommendation[3]==100 and recommendation[4]==[] and recommendation[6]==[] and recommendation[7]==[] and recommendation[8]==[]
+ assert [item for item in evaluations if item[0]=='B']==[('B','LEAD_EXECUTOR',100,'SELECTED',False,[],'unit +30; role +25; domain +25; availability +10',['DIRECT-A','DIRECT-B'],['D1','D2'])]
+ assert len({match[-1] for match in matches})==1
+ assert [item for item in matches if item[0]=='B']==[('B','LEAD_EXECUTOR','SELECTED',100.0,'[]','unit +30; role +25; domain +25; availability +10',matches[0][-1])]
