@@ -114,6 +114,7 @@ class QLVBConfig:
     password_source: str = "MANUAL"
     planner_api_url: str = ""
     planner_ingest_token: str = ""
+    active_tenant_id: str = ""
 
     @property
     def root_path(self) -> Path:
@@ -264,6 +265,7 @@ def load_config(path: Path | None = None) -> QLVBConfig:
         password_source=password_source,
         planner_api_url=raw.get("planner_api_url", ""),
         planner_ingest_token=planner_ingest_token,
+        active_tenant_id=raw.get("active_tenant_id", ""),
     )
 
     cfg.root_path.mkdir(parents=True, exist_ok=True)
@@ -293,6 +295,7 @@ def save_config(cfg: QLVBConfig, path: Path | None = None) -> Path:
         "selectors": cfg.selectors,
         "planner_api_url": cfg.planner_api_url,
         "planner_ingest_token": cfg.planner_ingest_token,
+        "active_tenant_id": cfg.active_tenant_id,
     }
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)

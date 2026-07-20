@@ -14,6 +14,7 @@ import customtkinter as ctk
 from tools.qlvb_downloader.config import QLVBConfig, load_config, save_config, VERSION
 from tools.qlvb_downloader.paths import project_root
 from tools.qlvb_downloader.storage import StorageManager
+from tools.qlvb_downloader.assignment_draft_service import AssignmentDraftService, AssignmentDraftServiceError
 
 # Set UI Theme
 ctk.set_appearance_mode("System")  # Modes: "System", "Dark", "Light"
@@ -50,6 +51,7 @@ class ConfigApp(ctk.CTk):
         # Build UI layout
         self._build_sidebar()
         self._build_frames()
+        self._build_assignment_drafts_frame()
         self.select_frame_by_name("overview")
 
         # Auto check system at startup
@@ -90,6 +92,7 @@ class ConfigApp(ctk.CTk):
             ("sync", "Đồng bộ KPI", "cloud-upload"),
             ("logs", "Nhật ký", "file-text"),
             ("help", "Trợ giúp & Bảo mật", "help-circle"),
+            ("assignment_drafts", "Dự thảo giao việc", "clipboard"),
         ]
 
         for idx, (name, label, icon) in enumerate(nav_items, start=2):
@@ -676,6 +679,52 @@ class ConfigApp(ctk.CTk):
             self.refresh_sync_table()
         elif name == "logs":
             self.scan_log_files()
+        elif name == "assignment_drafts":
+            self.refresh_assignment_drafts()
+
+    def _build_assignment_drafts_frame(self):
+        frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.frames["assignment_drafts"] = frame
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(3, weight=1)
+        ctk.CTkLabel(frame, text="Dự thảo giao việc", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, padx=20, pady=(20, 8), sticky="w")
+        self.assignment_tenant_label = ctk.CTkLabel(frame, text="")
+        self.assignment_tenant_label.grid(row=1, column=0, padx=20, pady=(0, 8), sticky="w")
+        actions = ctk.CTkFrame(frame); actions.grid(row=2, column=0, padx=20, pady=8, sticky="ew")
+        ctk.CTkButton(actions, text="Làm mới", command=self.refresh_assignment_drafts).pack(side="left", padx=8, pady=8)
+        ctk.CTkButton(actions, text="Xem chi tiết", command=self.show_assignment_draft).pack(side="left", padx=8, pady=8)
+        self.assignment_tree = ttk.Treeview(frame, columns=("title", "unit", "due", "priority", "version", "status"), show="headings")
+        for key, text, width in (("title", "Tiêu đề nhiệm vụ", 300), ("unit", "Đơn vị", 130), ("due", "Thời hạn", 100), ("priority", "Ưu tiên", 90), ("version", "Phiên bản", 80), ("status", "Trạng thái", 160)):
+            self.assignment_tree.heading(key, text=text); self.assignment_tree.column(key, width=width, anchor="w")
+        self.assignment_tree.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="nsew")
+
+    def refresh_assignment_drafts(self):
+        for item in self.assignment_tree.get_children(): self.assignment_tree.delete(item)
+        tenant = self.cfg.active_tenant_id.strip()
+        if not tenant:
+            self.assignment_tenant_label.configure(text="Chưa xác định đơn vị làm việc")
+            return
+        try:
+            service = AssignmentDraftService(str(self.cfg.root_path))
+            self.assignment_tenant_label.configure(text=f"Đơn vị làm việc: {tenant}")
+            for draft in service.list_pending_drafts(tenant):
+                self.assignment_tree.insert("", "end", iid=draft.id, values=(draft.task_title, draft.lead_unit_source_key or "", draft.proposed_due_date or "", draft.priority, draft.draft_version, draft.initial_status))
+        except AssignmentDraftServiceError as exc: self.assignment_tenant_label.configure(text=str(exc))
+
+    def show_assignment_draft(self):
+        selected = self.assignment_tree.selection()
+        tenant = self.cfg.active_tenant_id.strip()
+        if not selected or not tenant: return
+        try:
+            draft = AssignmentDraftService(str(self.cfg.root_path)).get_draft_detail(tenant, selected[0])
+            if not draft: raise AssignmentDraftServiceError("Không tìm thấy dự thảo")
+            window = ctk.CTkToplevel(self); window.title("Chi tiết dự thảo"); window.geometry("700x560")
+            text = ctk.CTkTextbox(window); text.pack(fill="both", expand=True, padx=16, pady=16)
+            people = "\n".join(f"- {p.role_type}: {p.personnel_source_key}" for p in draft.personnel) or "Chưa đề xuất"
+            warnings = "\n".join(f"- {w.get('code', '')}" for w in draft.warnings) or "Không có"
+            text.insert("1.0", f"Văn bản: {draft.source_document_id}\nPhiên bản: {draft.draft_version}\nTrạng thái: {draft.initial_status}\n\n{draft.task_title}\n\n{draft.task_description}\n\nĐơn vị: {draft.lead_unit_source_key or ''}\nThời hạn: {draft.proposed_due_date or ''}\nƯu tiên: {draft.priority}\nTin cậy: {draft.overall_confidence}\n\nNhân sự:\n{people}\n\nCảnh báo:\n{warnings}")
+            text.configure(state="disabled")
+        except AssignmentDraftServiceError as exc: messagebox.showerror("Dự thảo giao việc", str(exc))
 
     def write_log(self, text: str):
         self.log_textbox.insert("end", text)
