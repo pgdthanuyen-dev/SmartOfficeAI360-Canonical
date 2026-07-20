@@ -15,6 +15,8 @@ from tools.qlvb_downloader.config import QLVBConfig, load_config, save_config, V
 from tools.qlvb_downloader.paths import project_root
 from tools.qlvb_downloader.storage import StorageManager
 from tools.qlvb_downloader.assignment_draft_service import AssignmentDraftService, AssignmentDraftServiceError
+from tools.qlvb_downloader.assignment_draft_ui import AssignmentDraftDetailDialog
+from tools.qlvb_downloader.assignment_draft_planner_handoff import planner_display_status
 
 # Set UI Theme
 ctk.set_appearance_mode("System")  # Modes: "System", "Dark", "Light"
@@ -708,10 +710,28 @@ class ConfigApp(ctk.CTk):
             service = AssignmentDraftService(str(self.cfg.root_path))
             self.assignment_tenant_label.configure(text=f"Đơn vị làm việc: {tenant}")
             for draft in service.list_pending_drafts(tenant):
-                self.assignment_tree.insert("", "end", iid=draft.id, values=(draft.task_title, draft.lead_unit_source_key or "", draft.proposed_due_date or "", draft.priority, draft.draft_version, draft.initial_status))
+                self.assignment_tree.insert("", "end", iid=draft.id, values=(draft.task_title, draft.lead_unit_source_key or "", draft.proposed_due_date or "", draft.priority, draft.draft_version, planner_display_status(draft.current_status)))
         except AssignmentDraftServiceError as exc: self.assignment_tenant_label.configure(text=str(exc))
 
     def show_assignment_draft(self):
+        selected = self.assignment_tree.selection()
+        tenant = self.cfg.active_tenant_id.strip()
+        if not selected or not tenant:
+            return
+        try:
+            AssignmentDraftDetailDialog(
+                self,
+                AssignmentDraftService(str(self.cfg.root_path)),
+                tenant,
+                selected[0],
+                self.refresh_assignment_drafts,
+                self.cfg.planner_api_url,
+                self.cfg.planner_ingest_token,
+            ).show()
+        except AssignmentDraftServiceError as exc:
+            messagebox.showerror("Du thao giao viec", str(exc))
+
+    def _legacy_show_assignment_draft(self):
         selected = self.assignment_tree.selection()
         tenant = self.cfg.active_tenant_id.strip()
         if not selected or not tenant: return

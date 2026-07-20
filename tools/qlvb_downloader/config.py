@@ -183,7 +183,7 @@ def normalize_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
                 normalized[target] = raw[key]
                 break
 
-    for key in ["remember_password", "browser", "download", "selectors", "version"]:
+    for key in ["remember_password", "browser", "download", "selectors", "version", "active_tenant_id"]:
         if key in raw:
             normalized[key] = raw[key]
 

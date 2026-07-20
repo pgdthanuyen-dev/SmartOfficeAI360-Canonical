@@ -23,6 +23,9 @@ class AssignmentDraftService:
     def get_draft_detail(self, active_tenant_id: str, draft_id: str):
         return self._with_repository(active_tenant_id, lambda repo: repo.get_draft_by_id(active_tenant_id, draft_id))
 
+    def get_draft_review_state(self, active_tenant_id: str, draft_id: str):
+        return self._with_review(active_tenant_id, lambda review: review.get_current_review_state(active_tenant_id, draft_id))
+
     def revise_draft(self, active_tenant_id: str, draft_id: str, edits: dict[str, Any], reviewer: str, reason: str | None):
         return self._with_review(active_tenant_id, lambda review: review.create_office_revision(active_tenant_id, draft_id, reviewer, reason, edits))
 
