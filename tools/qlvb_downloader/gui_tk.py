@@ -725,8 +725,6 @@ class ConfigApp(ctk.CTk):
                 tenant,
                 selected[0],
                 self.refresh_assignment_drafts,
-                self.cfg.planner_api_url,
-                self.cfg.planner_ingest_token,
             ).show()
         except AssignmentDraftServiceError as exc:
             messagebox.showerror("Du thao giao viec", str(exc))

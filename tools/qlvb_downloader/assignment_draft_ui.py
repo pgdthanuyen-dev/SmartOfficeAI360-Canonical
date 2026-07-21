@@ -2,30 +2,29 @@
 
 from __future__ import annotations
 
+import webbrowser
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from .assignment_draft_planner_handoff import (
     PENDING_OFFICE_REVIEW,
-    build_planner_handoff,
     planner_display_status,
-    planner_handoff_configured,
 )
 from .assignment_draft_service import AssignmentDraftService, AssignmentDraftServiceError
+from .planner_draft_handoff_client import PlannerHandoffOutcome
 
 
 class AssignmentDraftDetailDialog:
     """Displays an AI draft only; Planner KPI owns all Office edits and decisions."""
 
-    def __init__(self, parent, service: AssignmentDraftService, tenant_id: str, draft_id: str, on_changed,
-                 planner_url: str = "", planner_token: str = "") -> None:
+    def __init__(self, parent, service: AssignmentDraftService, tenant_id: str, draft_id: str, on_changed) -> None:
         self.service = service
         self.tenant_id = tenant_id
         self.draft_id = draft_id
         self.on_changed = on_changed
-        self.planner_url = planner_url
-        self.planner_token = planner_token
+        self.send_button = None
+        self.handoff_status_label = None
         self.window = ctk.CTkToplevel(parent)
         self.window.title("Chi tiet du thao AI")
         self.window.geometry("760x620")
@@ -51,18 +50,51 @@ class AssignmentDraftDetailDialog:
         body.configure(state="disabled")
         controls = ctk.CTkFrame(self.window)
         controls.pack(fill="x", padx=16, pady=(0, 16))
-        ctk.CTkButton(
-            controls, text="Gui du thao sang Planner KPI", command=lambda: self.prepare_planner_handoff(draft),
+        self.send_button = ctk.CTkButton(
+            controls, text="Gui du thao sang Planner KPI", command=self.send_to_planner,
             state="normal" if draft.current_status == PENDING_OFFICE_REVIEW else "disabled",
-        ).pack(side="left", padx=6, pady=8)
-
-    def prepare_planner_handoff(self, draft) -> None:
-        if not planner_handoff_configured(self.planner_url, self.planner_token):
-            messagebox.showwarning("Planner KPI", "Chua cau hinh ket noi Planner KPI", parent=self.window)
-            return
-        handoff = build_planner_handoff(draft)
-        messagebox.showinfo(
-            "Planner KPI",
-            f"Payload draft da san sang cho Planner KPI. Idempotency key: {handoff.idempotency_key}",
-            parent=self.window,
         )
+        self.send_button.pack(side="left", padx=6, pady=8)
+        self.handoff_status_label = ctk.CTkLabel(controls, text="")
+        self.handoff_status_label.pack(side="left", padx=6, pady=8)
+
+    def send_to_planner(self) -> None:
+        if self.send_button is None:
+            return
+        self.send_button.configure(state="disabled", text="Dang gui...")
+        if self.handoff_status_label is not None:
+            self.handoff_status_label.configure(text="Dang gui du thao sang Planner KPI")
+        self.window.update_idletasks()
+        try:
+            result = self.service.send_draft_to_planner(self.tenant_id, self.draft_id)
+        except AssignmentDraftServiceError as exc:
+            self._show_handoff_error(str(exc))
+            return
+        if result.outcome is PlannerHandoffOutcome.CREATED:
+            self._show_handoff_success("Da tao du thao tren Planner KPI", result.planner_draft_url)
+        elif result.outcome is PlannerHandoffOutcome.DUPLICATE:
+            self._show_handoff_success("Du thao da ton tai tren Planner KPI", result.planner_draft_url)
+        else:
+            messages = {
+                PlannerHandoffOutcome.VALIDATION_ERROR: "Planner tu choi du lieu du thao.",
+                PlannerHandoffOutcome.AUTH_ERROR: "Xac thuc Planner KPI khong thanh cong.",
+                PlannerHandoffOutcome.PLANNER_UNAVAILABLE: "Planner KPI chua san sang hoac chua duoc cau hinh.",
+                PlannerHandoffOutcome.UNKNOWN_RESULT: "Chua xac dinh ket qua gui. Hay thu lai thu cong.",
+            }
+            self._show_handoff_error(messages.get(result.outcome, "Khong the gui du thao."))
+
+    def _show_handoff_success(self, message: str, planner_draft_url: str | None) -> None:
+        if self.handoff_status_label is not None:
+            self.handoff_status_label.configure(text=message)
+        if self.send_button is not None:
+            self.send_button.configure(text="Da gui Planner", state="disabled")
+        if planner_draft_url:
+            ctk.CTkButton(self.window, text="Mo tren Planner KPI", command=lambda: webbrowser.open(planner_draft_url)).pack(pady=(0, 12))
+        self.on_changed()
+
+    def _show_handoff_error(self, message: str) -> None:
+        if self.handoff_status_label is not None:
+            self.handoff_status_label.configure(text=message)
+        if self.send_button is not None:
+            self.send_button.configure(text="Gui du thao sang Planner KPI", state="normal")
+        messagebox.showwarning("Planner KPI", message, parent=self.window)

@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from .assignment_draft_repository import AssignmentDraftRepository, init_assignment_draft_schema
-from .assignment_draft_review import AssignmentDraftReviewError, AssignmentDraftReviewService
+from .assignment_draft_planner_handoff import build_planner_handoff
+from .assignment_draft_review import AssignmentDraftReviewError, AssignmentDraftReviewService, PENDING_OFFICE_REVIEW
 from .index_db import open_db
+from .planner_draft_handoff_client import PlannerDraftHandoffClient, PlannerHandoffResult
 
 
 class AssignmentDraftServiceError(ValueError):
@@ -14,8 +16,9 @@ class AssignmentDraftServiceError(ValueError):
 
 
 class AssignmentDraftService:
-    def __init__(self, data_dir: str) -> None:
+    def __init__(self, data_dir: str, handoff_client: PlannerDraftHandoffClient | None = None) -> None:
         self.data_dir = data_dir
+        self._handoff_client = handoff_client or PlannerDraftHandoffClient()
 
     def list_pending_drafts(self, active_tenant_id: str, limit: int = 50):
         return self._with_repository(active_tenant_id, lambda repo: repo.list_pending_drafts(active_tenant_id, limit))
@@ -34,6 +37,16 @@ class AssignmentDraftService:
 
     def reject_draft(self, active_tenant_id: str, draft_id: str, reviewer: str, reason: str):
         return self._with_review(active_tenant_id, lambda review: review.reject_draft(active_tenant_id, draft_id, reviewer, reason))
+
+    def send_draft_to_planner(self, active_tenant_id: str, draft_id: str) -> PlannerHandoffResult:
+        """Load the immutable snapshot server-side and hand it to Planner once."""
+
+        draft = self._with_repository(active_tenant_id, lambda repo: repo.get_draft_by_id(active_tenant_id, draft_id))
+        if draft is None:
+            raise AssignmentDraftServiceError("Khong tim thay du thao.")
+        if draft.current_status != PENDING_OFFICE_REVIEW:
+            raise AssignmentDraftServiceError("Du thao khong con cho gui Planner.")
+        return self._handoff_client.send(build_planner_handoff(draft))
 
     def _with_repository(self, tenant: str, callback):
         self._tenant(tenant)
