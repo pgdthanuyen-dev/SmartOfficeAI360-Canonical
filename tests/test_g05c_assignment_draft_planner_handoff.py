@@ -15,7 +15,7 @@ def _draft(title="Demo draft"):
         tenant_id="tenant-a", source_system="demo", source_document_id="DOC-1", source_revision="REV-1",
         id="draft-1", draft_version=1, task_title=title, task_description="Demo description",
         lead_unit_source_key="UNIT-A", proposed_start_date="2026-07-20", proposed_due_date="2026-07-25",
-        priority="NORMAL", personnel=(SimpleNamespace(role_type="LEAD_EXECUTOR", personnel_source_key="PERSON-1", is_substitute=False),),
+        priority="NORMAL", personnel=(SimpleNamespace(role_type="LEAD_EXECUTOR", personnel_source_key="PERSON-1", is_substitute=False, confidence=80.0, item_order=0),),
         deliverables=("Output",), checklist_items=("Check",), milestones=("Milestone",),
         warnings=({"code": "DEMO_WARNING", "severity": "WARNING", "field_or_role": None, "message": "Do not export this text"},),
         overall_confidence=85.0, source_input_fingerprint="a" * 64, draft_content_fingerprint="b" * 64,
@@ -33,6 +33,18 @@ def test_handoff_contains_required_draft_fields_without_credentials_or_warning_m
 def test_handoff_idempotency_key_is_stable_for_the_same_draft_content():
     assert build_planner_handoff(_draft()).idempotency_key == build_planner_handoff(_draft()).idempotency_key
     assert build_planner_handoff(_draft("Changed")).idempotency_key == build_planner_handoff(_draft()).idempotency_key
+
+
+def test_handoff_adapts_only_normalized_g05_fields_to_the_planner_receiver_contract():
+    payload = build_planner_handoff(_draft()).to_planner_receiver_payload()
+    assert payload["sourceSystem"] == "SmartOfficeAI360"
+    assert payload["smartOfficeDraftId"] == "draft-1"
+    assert payload["personnel"] == [{
+        "roleType": "LEAD_EXECUTOR", "personnelSourceKey": "PERSON-1", "confidence": 0.8,
+        "isSubstitute": False, "itemOrder": 0,
+    }]
+    assert payload["overallConfidence"] == 0.85
+    assert "message" not in str(payload).lower() and "token" not in str(payload).lower()
 
 
 def test_display_status_and_configuration_guard_are_local_only():
