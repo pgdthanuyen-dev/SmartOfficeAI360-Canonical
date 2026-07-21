@@ -53,6 +53,9 @@ class PlannerDraftHandoff:
     source_input_fingerprint: str
     draft_content_fingerprint: str
     idempotency_key: str
+    document_number: str | None
+    subject: str | None
+    issuing_agency: str | None
 
     def to_planner_receiver_payload(self) -> dict[str, Any]:
         """Adapt the credential-free G05C snapshot to Planner's B6 receiver."""
@@ -66,6 +69,9 @@ class PlannerDraftHandoff:
             "smartOfficeDraftVersion": self.draft_version,
             "taskTitle": self.task_title,
             "taskDescription": self.task_description,
+            "documentNumber": self.document_number,
+            "subject": self.subject,
+            "issuingAgency": self.issuing_agency,
             "leadUnitSourceKey": self.lead_unit_source_key,
             "proposedStartDate": self.proposed_start_date,
             "proposedDueDate": self.proposed_due_date,
@@ -126,4 +132,6 @@ def build_planner_handoff(draft: Any) -> PlannerDraftHandoff:
         warnings=tuple({"code": warning.get("code"), "severity": warning.get("severity"), "field_or_role": warning.get("field_or_role")} for warning in draft.warnings),
         overall_confidence=draft.overall_confidence, source_input_fingerprint=draft.source_input_fingerprint,
         draft_content_fingerprint=draft.draft_content_fingerprint, idempotency_key=idempotency_key,
+        document_number=getattr(draft, "document_number", None), subject=getattr(draft, "subject", None),
+        issuing_agency=getattr(draft, "issuing_agency", None),
     )

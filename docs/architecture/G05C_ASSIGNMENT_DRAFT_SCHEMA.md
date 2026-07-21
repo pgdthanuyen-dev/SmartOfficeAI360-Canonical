@@ -35,3 +35,11 @@ audit, and operation idempotency tables/services are not created in this MVP.
 
 Not implemented: Assignment Draft Builder, Office Review, state transition service,
 Planner, SharePoint, API, UI, identity mapping, or external integration.
+
+## B8B Source Metadata Migration
+
+`g05c_assignment_draft_source_metadata_1` is additive and idempotent. It adds
+nullable, bounded `document_number`, `subject`, and `issuing_agency` columns to
+`assignment_drafts`; it does not rewrite legacy rows or create Planner or task
+identifiers. Existing rows read these values as `NULL` and remain handoff
+compatible with the nullable Planner receiver fields.

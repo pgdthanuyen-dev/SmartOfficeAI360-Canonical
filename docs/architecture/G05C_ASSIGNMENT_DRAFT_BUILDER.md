@@ -1,5 +1,16 @@
 # G05C Assignment Draft Builder
 
+## B8B Source Metadata
+
+The builder accepts only source-derived document metadata: `document_number`
+comes from the canonical document number or signature (`documents.doc_no`),
+`subject` comes from the official document subject (`documents.title`), and
+`issuing_agency` comes from the canonical issuing agency
+(`documents.issuing_agency`). These values are not inferred from the proposed
+task, lead unit, tenant, or document identifier. They are bounded and stored
+as immutable snapshot metadata, while remaining outside the legacy B7
+idempotency material.
+
 ## Goal
 
 `g05c.builder.1` is a deterministic, library-only builder. It merges the

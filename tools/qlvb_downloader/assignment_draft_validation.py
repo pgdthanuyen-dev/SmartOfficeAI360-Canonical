@@ -15,6 +15,7 @@ MAX_SOURCE_DOCUMENT_ID_LENGTH = 500
 MAX_SOURCE_REVISION_LENGTH = 200
 MAX_DOCUMENT_NUMBER_LENGTH = 500
 MAX_SUBJECT_LENGTH = 1000
+MAX_ISSUING_AGENCY_LENGTH = 500
 MAX_SUMMARY_LENGTH = 10_000
 MAX_TASK_TITLE_LENGTH = 300
 MAX_TASK_DESCRIPTION_LENGTH = 10_000
@@ -159,6 +160,7 @@ def validate_build_request(request: AssignmentDraftBuildRequest) -> None:
     normalize_text(request.source_revision, "source_revision", MAX_SOURCE_REVISION_LENGTH, required=True)
     normalize_optional_text(request.document_number, "document_number", MAX_DOCUMENT_NUMBER_LENGTH)
     normalize_text(request.subject, "subject", MAX_SUBJECT_LENGTH)
+    normalize_optional_text(request.issuing_agency, "issuing_agency", MAX_ISSUING_AGENCY_LENGTH)
     normalize_text(request.normalized_summary, "normalized_summary", MAX_SUMMARY_LENGTH)
     normalize_text(request.proposed_task_title, "proposed_task_title", MAX_TASK_TITLE_LENGTH, required=True)
     normalize_text(request.proposed_task_description, "proposed_task_description", MAX_TASK_DESCRIPTION_LENGTH)

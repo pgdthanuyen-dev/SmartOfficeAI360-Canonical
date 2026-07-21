@@ -26,6 +26,7 @@ class AssignmentDraftBuildRequest:
     proposed_start_date: str | None
     proposed_due_date: str | None
     proposed_priority: str | None
+    issuing_agency: str | None = None
     proposed_deliverables: list[str] = field(default_factory=list)
     proposed_checklist_items: list[str] = field(default_factory=list)
     proposed_milestones: list[str] = field(default_factory=list)
@@ -81,3 +82,6 @@ class AssignmentDraftCandidate:
     source_input_fingerprint: str
     draft_content_fingerprint: str
     builder_version: str = ASSIGNMENT_DRAFT_BUILDER_VERSION
+    document_number: str | None = None
+    subject: str | None = None
+    issuing_agency: str | None = None

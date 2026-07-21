@@ -18,7 +18,10 @@ from .assignment_draft_models import (
 from .assignment_draft_validation import (
     MAX_CHECKLIST_ITEMS,
     MAX_DELIVERABLES,
+    MAX_DOCUMENT_NUMBER_LENGTH,
+    MAX_ISSUING_AGENCY_LENGTH,
     MAX_MILESTONES,
+    MAX_SUBJECT_LENGTH,
     MAX_UNIT_KEY_LENGTH,
     MAX_WARNING_ACTION_LENGTH,
     MAX_WARNING_MESSAGE_LENGTH,
@@ -70,6 +73,9 @@ class AssignmentDraftBuilder:
         source_system = normalize_text(request.source_system, "source_system", 200, required=True)
         document_id = normalize_text(request.source_document_id, "source_document_id", 500, required=True)
         revision = normalize_text(request.source_revision, "source_revision", 200, required=True)
+        document_number = normalize_optional_text(request.document_number, "document_number", MAX_DOCUMENT_NUMBER_LENGTH)
+        subject = normalize_text(request.subject, "subject", MAX_SUBJECT_LENGTH)
+        issuing_agency = normalize_optional_text(request.issuing_agency, "issuing_agency", MAX_ISSUING_AGENCY_LENGTH)
         title = normalize_text(request.proposed_task_title, "proposed_task_title", 300, required=True)
         description = normalize_text(request.proposed_task_description, "proposed_task_description", 10_000)
         received_date = normalize_date(request.received_date, "received_date")
@@ -111,9 +117,13 @@ class AssignmentDraftBuilder:
             overall_confidence=overall_confidence, source_engine_versions=source_versions,
             source_fingerprints=source_fingerprints, source_input_fingerprint=source_input_fingerprint,
             draft_content_fingerprint="", builder_version=ASSIGNMENT_DRAFT_BUILDER_VERSION,
+            document_number=document_number, subject=subject, issuing_agency=issuing_agency,
         )
         content = asdict(candidate)
         content.pop("draft_content_fingerprint")
+        # Source display metadata is not part of the existing B7 idempotency material.
+        for field in ("document_number", "subject", "issuing_agency"):
+            content.pop(field)
         return replace(candidate, draft_content_fingerprint=_sha256(content))
 
     def _personnel(self, g05b: Any, required_roles: tuple[str, ...]) -> tuple[tuple[AssignmentDraftPersonnelProposal, ...], list[str], list[str]]:

@@ -17,6 +17,16 @@ unrecognised replies are `UNKNOWN_RESULT`; the client never automatically
 retries a POST. This handoff creates no official Planner task and does not add
 Planner approval, callbacks, or SharePoint activity.
 
+## B8B Source Metadata
+
+Each immutable G05C snapshot stores the source document number or signature,
+official source subject, and issuing agency. The B7 adapter sends them exactly
+as `documentNumber`, `subject`, and `issuingAgency`; it never substitutes the
+proposed task title, lead unit, tenant, or source identifier. The fields remain
+nullable for legacy snapshots and Office edits cannot overwrite them. They are
+not part of the existing B7 idempotency material, so enriching a source record
+with this display metadata cannot create a second Planner draft.
+
 ## B8A Persistence
 
 The same SQLite G05C storage records a bounded handoff summary on each stored
