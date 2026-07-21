@@ -15,4 +15,14 @@ The stable G05C idempotency key is sent as JSON `idempotencyKey`. A receiver
 and authentication failures are explicit. Timeouts, connection failures, and
 unrecognised replies are `UNKNOWN_RESULT`; the client never automatically
 retries a POST. This handoff creates no official Planner task and does not add
-Planner approval, callbacks, SharePoint activity, or a G05C persistence change.
+Planner approval, callbacks, or SharePoint activity.
+
+## B8A Persistence
+
+The same SQLite G05C storage records a bounded handoff summary on each stored
+draft and an append-only `assignment_draft_planner_handoff_attempts` row for
+every send. A successful `CREATED` or `DUPLICATE` result is returned only after
+that transaction commits. The stored link never changes silently if Planner
+returns a different draft id. Failed and unknown outcomes keep a previous valid
+link and store only a bounded, safe message; attempts never include secrets,
+headers, cookies, tokens, request bodies, or response bodies.

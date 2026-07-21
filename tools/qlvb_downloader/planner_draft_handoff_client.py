@@ -23,6 +23,7 @@ class PlannerHandoffOutcome(StrEnum):
     AUTH_ERROR = "AUTH_ERROR"
     PLANNER_UNAVAILABLE = "PLANNER_UNAVAILABLE"
     UNKNOWN_RESULT = "UNKNOWN_RESULT"
+    LOCAL_PERSISTENCE_ERROR = "LOCAL_PERSISTENCE_ERROR"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class PlannerHandoffResult:
     planner_status: str | None = None
     planner_draft_url: str | None = None
     message: str = ""
+    http_status: int | None = None
 
 
 HttpTransport = Callable[[str, dict[str, str], bytes, float], tuple[int, Any]]
@@ -91,20 +93,23 @@ class PlannerDraftHandoffClient:
             return PlannerHandoffResult(PlannerHandoffOutcome.UNKNOWN_RESULT, correlation_id, message="Planner response could not be verified.")
         return self._classify(status, body, correlation_id)
 
+    def planner_draft_url(self, planner_draft_id: str | None) -> str | None:
+        return self._draft_url(planner_draft_id) if planner_draft_id else None
+
     def _classify(self, status: int, body: Any, correlation_id: str) -> PlannerHandoffResult:
         if status in {201, 200} and isinstance(body, dict) and body.get("success") is True:
             draft_id, planner_status, duplicate = body.get("draftId"), body.get("status"), body.get("duplicate")
             if isinstance(draft_id, str) and isinstance(planner_status, str) and isinstance(duplicate, bool):
                 outcome = PlannerHandoffOutcome.DUPLICATE if duplicate else PlannerHandoffOutcome.CREATED
                 if (status == 201 and not duplicate) or (status == 200 and duplicate):
-                    return PlannerHandoffResult(outcome, correlation_id, draft_id, planner_status, self._draft_url(draft_id))
+                    return PlannerHandoffResult(outcome, correlation_id, draft_id, planner_status, self._draft_url(draft_id), http_status=status)
         if status in {400, 413}:
-            return PlannerHandoffResult(PlannerHandoffOutcome.VALIDATION_ERROR, correlation_id, message="Planner rejected the draft payload.")
+            return PlannerHandoffResult(PlannerHandoffOutcome.VALIDATION_ERROR, correlation_id, message="Planner rejected the draft payload.", http_status=status)
         if status in {401, 403}:
-            return PlannerHandoffResult(PlannerHandoffOutcome.AUTH_ERROR, correlation_id, message="Planner handoff authentication failed.")
+            return PlannerHandoffResult(PlannerHandoffOutcome.AUTH_ERROR, correlation_id, message="Planner handoff authentication failed.", http_status=status)
         if status == 503 or status >= 500:
-            return PlannerHandoffResult(PlannerHandoffOutcome.PLANNER_UNAVAILABLE, correlation_id, message="Planner is unavailable.")
-        return PlannerHandoffResult(PlannerHandoffOutcome.UNKNOWN_RESULT, correlation_id, message="Planner returned an unexpected result.")
+            return PlannerHandoffResult(PlannerHandoffOutcome.PLANNER_UNAVAILABLE, correlation_id, message="Planner is unavailable.", http_status=status)
+        return PlannerHandoffResult(PlannerHandoffOutcome.UNKNOWN_RESULT, correlation_id, message="Planner returned an unexpected result.", http_status=status)
 
     def _draft_url(self, planner_draft_id: str) -> str | None:
         template = self.config.draft_url_template

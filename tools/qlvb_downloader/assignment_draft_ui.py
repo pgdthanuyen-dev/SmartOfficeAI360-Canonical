@@ -40,7 +40,8 @@ class AssignmentDraftDetailDialog:
         body.insert(
             "1.0",
             f"Van ban: {draft.source_document_id}\nDraft ID: {draft.id}\nPhien ban: {draft.draft_version}\n"
-            f"Trang thai gui Planner: {planner_display_status(draft.current_status)}\n\n{draft.task_title}\n\n"
+            f"Trang thai gui Planner: {planner_display_status(draft.planner_handoff_status)}\n"
+            f"Planner draft: {draft.planner_draft_id or ''}\n\n{draft.task_title}\n\n"
             f"{draft.task_description}\n\nDon vi AI de xuat: {draft.lead_unit_source_key or ''}\n"
             f"Bat dau: {draft.proposed_start_date or ''}\nThoi han: {draft.proposed_due_date or ''}\n"
             f"Uu tien: {draft.priority}\nMuc tin cay: {draft.overall_confidence}\n\nSan pham:\n"
@@ -52,11 +53,18 @@ class AssignmentDraftDetailDialog:
         controls.pack(fill="x", padx=16, pady=(0, 16))
         self.send_button = ctk.CTkButton(
             controls, text="Gui du thao sang Planner KPI", command=self.send_to_planner,
-            state="normal" if draft.current_status == PENDING_OFFICE_REVIEW else "disabled",
+            state="normal" if draft.current_status == PENDING_OFFICE_REVIEW and draft.planner_handoff_status != "SENT" else "disabled",
         )
         self.send_button.pack(side="left", padx=6, pady=8)
         self.handoff_status_label = ctk.CTkLabel(controls, text="")
         self.handoff_status_label.pack(side="left", padx=6, pady=8)
+        if draft.planner_handoff_status == "SENT":
+            self.handoff_status_label.configure(text="Da gui Planner KPI")
+            planner_draft_url = self.service.planner_draft_url(draft.planner_draft_id)
+            if planner_draft_url:
+                ctk.CTkButton(self.window, text="Mo tren Planner KPI", command=lambda: webbrowser.open(planner_draft_url)).pack(pady=(0, 12))
+        elif draft.planner_handoff_error:
+            self.handoff_status_label.configure(text=draft.planner_handoff_error)
 
     def send_to_planner(self) -> None:
         if self.send_button is None:
@@ -80,6 +88,7 @@ class AssignmentDraftDetailDialog:
                 PlannerHandoffOutcome.AUTH_ERROR: "Xac thuc Planner KPI khong thanh cong.",
                 PlannerHandoffOutcome.PLANNER_UNAVAILABLE: "Planner KPI chua san sang hoac chua duoc cau hinh.",
                 PlannerHandoffOutcome.UNKNOWN_RESULT: "Chua xac dinh ket qua gui. Hay thu lai thu cong.",
+                PlannerHandoffOutcome.LOCAL_PERSISTENCE_ERROR: "Planner da phan hoi nhung SmartOffice chua luu duoc ket qua.",
             }
             self._show_handoff_error(messages.get(result.outcome, "Khong the gui du thao."))
 

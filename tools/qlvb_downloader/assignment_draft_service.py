@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any
 
-from .assignment_draft_repository import AssignmentDraftRepository, init_assignment_draft_schema
+from .assignment_draft_repository import (
+    AssignmentDraftRepository,
+    PlannerHandoffAttempt,
+    init_assignment_draft_schema,
+)
 from .assignment_draft_planner_handoff import build_planner_handoff
 from .assignment_draft_review import AssignmentDraftReviewError, AssignmentDraftReviewService, PENDING_OFFICE_REVIEW
 from .index_db import open_db
-from .planner_draft_handoff_client import PlannerDraftHandoffClient, PlannerHandoffResult
+from .planner_draft_handoff_client import PlannerDraftHandoffClient, PlannerHandoffOutcome, PlannerHandoffResult
+from .domain_models import utc_now_iso
 
 
 class AssignmentDraftServiceError(ValueError):
@@ -41,12 +47,45 @@ class AssignmentDraftService:
     def send_draft_to_planner(self, active_tenant_id: str, draft_id: str) -> PlannerHandoffResult:
         """Load the immutable snapshot server-side and hand it to Planner once."""
 
-        draft = self._with_repository(active_tenant_id, lambda repo: repo.get_draft_by_id(active_tenant_id, draft_id))
-        if draft is None:
-            raise AssignmentDraftServiceError("Khong tim thay du thao.")
-        if draft.current_status != PENDING_OFFICE_REVIEW:
-            raise AssignmentDraftServiceError("Du thao khong con cho gui Planner.")
-        return self._handoff_client.send(build_planner_handoff(draft))
+        self._tenant(active_tenant_id)
+        connection = open_db(self.data_dir)
+        try:
+            init_assignment_draft_schema(connection)
+            repository = AssignmentDraftRepository(connection)
+            draft = repository.get_draft_by_id(active_tenant_id, draft_id)
+            if draft is None:
+                raise AssignmentDraftServiceError("Khong tim thay du thao.")
+            if draft.current_status != PENDING_OFFICE_REVIEW:
+                raise AssignmentDraftServiceError("Du thao khong con cho gui Planner.")
+            handoff = build_planner_handoff(draft)
+            started_at, started = utc_now_iso(), monotonic()
+            result = self._handoff_client.send(handoff)
+            attempt = PlannerHandoffAttempt(
+                started_at=started_at, completed_at=utc_now_iso(), result=result.outcome.value,
+                planner_draft_id=result.planner_draft_id, correlation_id=result.correlation_id,
+                http_status=result.http_status, duration_ms=max(0, int((monotonic() - started) * 1000)),
+                error_code=None if result.outcome in {PlannerHandoffOutcome.CREATED, PlannerHandoffOutcome.DUPLICATE} else result.outcome.value,
+                error_message=result.message, idempotency_key_hash=handoff.idempotency_key,
+            )
+            try:
+                repository.record_planner_handoff_attempt(active_tenant_id, draft_id, attempt)
+            except Exception:
+                return PlannerHandoffResult(
+                    PlannerHandoffOutcome.LOCAL_PERSISTENCE_ERROR, result.correlation_id,
+                    result.planner_draft_id, result.planner_status,
+                    message="Planner responded, but SmartOffice could not persist the handoff result.",
+                    http_status=result.http_status,
+                )
+            return result
+        except AssignmentDraftServiceError:
+            raise
+        except Exception as exc:
+            raise AssignmentDraftServiceError(self._message(exc)) from None
+        finally:
+            connection.close()
+
+    def planner_draft_url(self, planner_draft_id: str | None) -> str | None:
+        return self._handoff_client.planner_draft_url(planner_draft_id)
 
     def _with_repository(self, tenant: str, callback):
         self._tenant(tenant)

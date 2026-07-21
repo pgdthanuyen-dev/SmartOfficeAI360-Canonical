@@ -15,6 +15,10 @@ SMARTOFFICE_SOURCE_SYSTEM = "SmartOfficeAI360"
 
 def planner_display_status(current_status: str) -> str:
     return {
+        "NOT_SENT": "Chua gui Planner",
+        "SENT": "Da gui Planner",
+        "UNKNOWN": "Chua xac dinh ket qua gui",
+        "FAILED": "Gui Planner that bai",
         PENDING_OFFICE_REVIEW: "Du thao AI - Chua gui Planner",
         "PLANNER_SYNCING": "Dang gui Planner",
         "PLANNER_SYNCED": "Da gui Planner",

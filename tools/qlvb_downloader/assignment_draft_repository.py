@@ -15,6 +15,7 @@ from .personnel_directory_repository import init_personnel_directory_schema
 
 ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION = "g05c_assignment_draft_mvp_schema_1"
 ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION = "g05c_assignment_draft_review_events_1"
+ASSIGNMENT_DRAFT_HANDOFF_MIGRATION_VERSION = "g05c_assignment_draft_planner_handoff_1"
 MIGRATION_RUNTIME_ENTRYPOINT = "LIBRARY_ONLY"
 
 _SHA256_CHECK = "length({field}) = 64 AND {field} NOT GLOB '*[^0-9a-f]*'"
@@ -52,6 +53,12 @@ _CREATE_TABLES_SQL = [
         created_by_system TEXT NOT NULL CHECK(length(trim(created_by_system)) > 0 AND length(created_by_system) <= 200),
         schema_version TEXT NOT NULL CHECK(length(trim(schema_version)) > 0 AND length(schema_version) <= 50),
         builder_version TEXT NOT NULL CHECK(length(trim(builder_version)) > 0 AND length(builder_version) <= 100),
+        planner_handoff_status TEXT NOT NULL DEFAULT 'NOT_SENT' CHECK(planner_handoff_status IN ('NOT_SENT', 'SENT', 'UNKNOWN', 'FAILED')),
+        planner_draft_id TEXT CHECK(length(planner_draft_id) <= 200),
+        planner_handoff_at TEXT CHECK(length(planner_handoff_at) <= 64),
+        planner_handoff_result TEXT CHECK(length(planner_handoff_result) <= 64),
+        planner_handoff_correlation_id TEXT CHECK(length(planner_handoff_correlation_id) <= 100),
+        planner_handoff_error TEXT CHECK(length(planner_handoff_error) <= 500),
         UNIQUE(tenant_id, source_system, source_document_id, draft_version),
         CHECK(supersedes_draft_id IS NULL OR supersedes_draft_id <> id),
         FOREIGN KEY(supersedes_draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
@@ -86,6 +93,24 @@ _CREATE_TABLES_SQL = [
         FOREIGN KEY(draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS assignment_draft_planner_handoff_attempts (
+        id TEXT PRIMARY KEY,
+        draft_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL CHECK(length(trim(tenant_id)) > 0 AND length(tenant_id) <= 200),
+        started_at TEXT NOT NULL CHECK(length(started_at) <= 64),
+        completed_at TEXT NOT NULL CHECK(length(completed_at) <= 64),
+        result TEXT NOT NULL CHECK(length(result) <= 64),
+        planner_draft_id TEXT CHECK(length(planner_draft_id) <= 200),
+        correlation_id TEXT CHECK(length(correlation_id) <= 100),
+        http_status INTEGER CHECK(http_status IS NULL OR (http_status >= 100 AND http_status <= 599)),
+        duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0 AND duration_ms <= 120000),
+        error_code TEXT CHECK(length(error_code) <= 100),
+        error_message TEXT CHECK(length(error_message) <= 500),
+        idempotency_key_hash TEXT NOT NULL CHECK(length(idempotency_key_hash) = 64 AND idempotency_key_hash NOT GLOB '*[^0-9a-f]*'),
+        FOREIGN KEY(draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
+    );
+    """,
 ]
 
 _INDEXES_SQL = [
@@ -95,6 +120,7 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_draft_order ON assignment_draft_personnel(draft_id, item_order);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_source_key ON assignment_draft_personnel(tenant_id, personnel_source_key);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_review_events_current ON assignment_draft_review_events(tenant_id, draft_id, created_at DESC, id DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_assignment_draft_handoff_attempts_draft ON assignment_draft_planner_handoff_attempts(tenant_id, draft_id, completed_at ASC, id ASC);",
 ]
 
 
@@ -106,6 +132,7 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
     init_personnel_directory_schema(conn)
     for sql in _CREATE_TABLES_SQL:
         conn.execute(sql)
+    _upgrade_handoff_columns(conn)
     for sql in _INDEXES_SQL:
         conn.execute(sql)
     conn.execute(
@@ -116,7 +143,28 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION, utc_now_iso()),
     )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        (ASSIGNMENT_DRAFT_HANDOFF_MIGRATION_VERSION, utc_now_iso()),
+    )
     conn.commit()
+
+
+def _upgrade_handoff_columns(conn: sqlite3.Connection) -> None:
+    """Add B8A metadata to databases created before the handoff contract."""
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(assignment_drafts)").fetchall()}
+    additions = {
+        "planner_handoff_status": "TEXT NOT NULL DEFAULT 'NOT_SENT'",
+        "planner_draft_id": "TEXT",
+        "planner_handoff_at": "TEXT",
+        "planner_handoff_result": "TEXT",
+        "planner_handoff_correlation_id": "TEXT",
+        "planner_handoff_error": "TEXT",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE assignment_drafts ADD COLUMN {name} {definition}")
 
 
 ASSIGNMENT_DRAFT_SCHEMA_VERSION = "1.0.0"
@@ -131,6 +179,21 @@ class StoredAssignmentDraftPersonnel:
     is_substitute: bool
     confidence: float
     item_order: int
+
+
+@dataclass(frozen=True)
+class StoredPlannerHandoffAttempt:
+    id: str
+    started_at: str
+    completed_at: str
+    result: str
+    planner_draft_id: str | None
+    correlation_id: str | None
+    http_status: int | None
+    duration_ms: int
+    error_code: str | None
+    error_message: str | None
+    idempotency_key_hash: str
 
 
 @dataclass(frozen=True)
@@ -164,6 +227,31 @@ class StoredAssignmentDraft:
     supersedes_draft_id: str | None
     builder_version: str
     personnel: tuple[StoredAssignmentDraftPersonnel, ...]
+    planner_handoff_status: str
+    planner_draft_id: str | None
+    planner_handoff_at: str | None
+    planner_handoff_result: str | None
+    planner_handoff_correlation_id: str | None
+    planner_handoff_error: str | None
+    planner_handoff_attempts: tuple[StoredPlannerHandoffAttempt, ...]
+
+
+@dataclass(frozen=True)
+class PlannerHandoffAttempt:
+    started_at: str
+    completed_at: str
+    result: str
+    planner_draft_id: str | None
+    correlation_id: str | None
+    http_status: int | None
+    duration_ms: int
+    error_code: str | None
+    error_message: str | None
+    idempotency_key_hash: str
+
+
+class PlannerHandoffPersistenceConflict(ValueError):
+    pass
 
 
 class AssignmentDraftRepository:
@@ -224,6 +312,60 @@ class AssignmentDraftRepository:
             (tenant_id, safe_limit),
         ).fetchall()
         return [self._to_stored(row) for row in rows]
+
+    def record_planner_handoff_attempt(self, tenant_id: str, draft_id: str,
+                                       attempt: PlannerHandoffAttempt) -> StoredAssignmentDraft:
+        """Append one attempt and atomically refresh only the handoff summary."""
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                "SELECT planner_draft_id FROM assignment_drafts WHERE id=? AND tenant_id=?", (draft_id, tenant_id)
+            ).fetchone()
+            if row is None:
+                raise ValueError("draft is unavailable")
+            existing_id = row["planner_draft_id"]
+            conflict = bool(existing_id and attempt.planner_draft_id and existing_id != attempt.planner_draft_id)
+            error_code = "PLANNER_DRAFT_ID_CONFLICT" if conflict else attempt.error_code
+            error_message = "Planner returned a different draft id for this stored draft." if conflict else _safe_handoff_message(attempt.error_message)
+            self.connection.execute(
+                """INSERT INTO assignment_draft_planner_handoff_attempts
+                   (id, draft_id, tenant_id, started_at, completed_at, result, planner_draft_id,
+                    correlation_id, http_status, duration_ms, error_code, error_message, idempotency_key_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (new_id(), draft_id, tenant_id, attempt.started_at, attempt.completed_at, attempt.result,
+                 attempt.planner_draft_id, attempt.correlation_id, attempt.http_status, attempt.duration_ms,
+                 error_code, error_message, attempt.idempotency_key_hash),
+            )
+            if conflict:
+                self.connection.execute(
+                    """UPDATE assignment_drafts SET planner_handoff_result=?, planner_handoff_correlation_id=?,
+                       planner_handoff_error=? WHERE id=? AND tenant_id=?""",
+                    ("LOCAL_PERSISTENCE_ERROR", attempt.correlation_id, error_message, draft_id, tenant_id),
+                )
+                self.connection.commit()
+                raise PlannerHandoffPersistenceConflict(error_message)
+            status = _handoff_status(attempt.result)
+            successful = status == "SENT"
+            self.connection.execute(
+                """UPDATE assignment_drafts SET planner_handoff_status=?,
+                   planner_draft_id=COALESCE(?, planner_draft_id),
+                   planner_handoff_at=CASE WHEN ? THEN ? ELSE planner_handoff_at END,
+                   planner_handoff_result=?, planner_handoff_correlation_id=?, planner_handoff_error=?
+                   WHERE id=? AND tenant_id=?""",
+                (status, attempt.planner_draft_id, int(successful), attempt.completed_at, attempt.result,
+                 attempt.correlation_id, None if successful else error_message, draft_id, tenant_id),
+            )
+            self.connection.commit()
+        except PlannerHandoffPersistenceConflict:
+            raise
+        except Exception:
+            self.connection.rollback()
+            raise
+        stored = self.get_draft_by_id(tenant_id, draft_id)
+        if stored is None:
+            raise RuntimeError("Persisted handoff could not be read back.")
+        return stored
 
     def _find_duplicate(self, candidate: AssignmentDraftCandidate) -> StoredAssignmentDraft | None:
         row = self.connection.execute(
@@ -317,6 +459,13 @@ class AssignmentDraftRepository:
             """,
             (row["id"],),
         ).fetchall()
+        attempt_rows = self.connection.execute(
+            """SELECT id, started_at, completed_at, result, planner_draft_id, correlation_id, http_status,
+                      duration_ms, error_code, error_message, idempotency_key_hash
+               FROM assignment_draft_planner_handoff_attempts
+               WHERE tenant_id=? AND draft_id=? ORDER BY rowid ASC""",
+            (row["tenant_id"], row["id"]),
+        ).fetchall()
         return StoredAssignmentDraft(
             id=row["id"], tenant_id=row["tenant_id"], source_system=row["source_system"],
             source_document_id=row["source_document_id"], source_revision=row["source_revision"],
@@ -342,6 +491,20 @@ class AssignmentDraftRepository:
                 )
                 for item in personnel_rows
             ),
+            planner_handoff_status=row["planner_handoff_status"], planner_draft_id=row["planner_draft_id"],
+            planner_handoff_at=row["planner_handoff_at"], planner_handoff_result=row["planner_handoff_result"],
+            planner_handoff_correlation_id=row["planner_handoff_correlation_id"],
+            planner_handoff_error=row["planner_handoff_error"],
+            planner_handoff_attempts=tuple(
+                StoredPlannerHandoffAttempt(
+                    id=item["id"], started_at=item["started_at"], completed_at=item["completed_at"],
+                    result=item["result"], planner_draft_id=item["planner_draft_id"],
+                    correlation_id=item["correlation_id"], http_status=item["http_status"],
+                    duration_ms=int(item["duration_ms"]), error_code=item["error_code"],
+                    error_message=item["error_message"], idempotency_key_hash=item["idempotency_key_hash"],
+                )
+                for item in attempt_rows
+            ),
         )
 
 
@@ -351,6 +514,23 @@ def _json(value: Any) -> str:
 
 def _read_json(value: str) -> Any:
     return json.loads(value)
+
+
+def _handoff_status(result: str) -> str:
+    if result in {"CREATED", "DUPLICATE"}:
+        return "SENT"
+    if result == "UNKNOWN_RESULT":
+        return "UNKNOWN"
+    return "FAILED"
+
+
+def _safe_handoff_message(value: str | None) -> str | None:
+    if not value:
+        return None
+    message = " ".join(value.split())[:500]
+    if any(marker in message.lower() for marker in ("secret", "token", "cookie", "authorization", "password")):
+        return "Planner handoff failed."
+    return message
 
 
 def save_draft_candidate(connection: sqlite3.Connection, candidate: AssignmentDraftCandidate) -> StoredAssignmentDraft:
