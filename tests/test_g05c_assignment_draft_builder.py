@@ -48,7 +48,8 @@ def _g05b(*, roles=None, confidence=84, unresolved=None, conflicts=None, warning
 def _request(**changes):
     values = dict(
         tenant_id="tenant-a", source_system="qlvb", source_document_id="DOC-1", source_revision="REV-1",
-        document_number="12/VP", subject="Handle the document", normalized_summary="A normalized summary.",
+        document_number="12/VP", subject="Handle the document", issuing_agency="Demo Issuing Agency",
+        normalized_summary="A normalized summary.",
         received_date="2026-07-20", issued_date="2026-07-19", proposed_task_title="Prepare the response",
         proposed_task_description="Prepare one response draft.", proposed_start_date="2026-07-20",
         proposed_due_date="2026-07-25", proposed_priority="HIGH", proposed_deliverables=["Response draft"],
@@ -68,6 +69,23 @@ def test_full_input_builds_one_pending_office_review_candidate():
     assert candidate.initial_status == "PENDING_OFFICE_REVIEW"
     assert candidate.task_title == "Prepare the response"
     assert candidate.builder_version == "g05c.builder.1"
+
+
+def test_source_document_metadata_is_canonical_and_does_not_change_existing_content_fingerprint():
+    first = build_assignment_draft(_request())
+    enriched = build_assignment_draft(_request(
+        document_number="Số 15/VP", subject="Trích yếu văn bản nguồn", issuing_agency="Cơ quan ban hành",
+    ))
+    assert (enriched.document_number, enriched.subject, enriched.issuing_agency) == (
+        "Số 15/VP", "Trích yếu văn bản nguồn", "Cơ quan ban hành",
+    )
+    assert enriched.source_input_fingerprint == first.source_input_fingerprint
+    assert enriched.draft_content_fingerprint == first.draft_content_fingerprint
+
+
+def test_issuing_agency_is_bounded_before_persistence():
+    with pytest.raises(AssignmentDraftValidationError, match="issuing_agency"):
+        build_assignment_draft(_request(issuing_agency="x" * 501))
 
 
 def test_maps_g05a_units_and_g05b_selected_personnel_only():

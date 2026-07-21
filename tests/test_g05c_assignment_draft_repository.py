@@ -58,7 +58,8 @@ def _candidate(*, tenant: str = "tenant-a", document_id: str = "DOC-1", revision
                g05a_fingerprint: str = "a" * 64, g05b_fingerprint: str = "b" * 64):
     return build_assignment_draft(AssignmentDraftBuildRequest(
         tenant_id=tenant, source_system="qlvb", source_document_id=document_id, source_revision=revision,
-        document_number="12/VP", subject="Handle document", normalized_summary="Normalized summary.",
+        document_number="12/VP", subject="Handle document", issuing_agency="Demo Issuing Agency",
+        normalized_summary="Normalized summary.",
         received_date="2026-07-20", issued_date="2026-07-19", proposed_task_title="Prepare response",
         proposed_task_description="Prepare one response draft.", proposed_start_date="2026-07-20",
         proposed_due_date="2026-07-25", proposed_priority="NORMAL", proposed_deliverables=["Response"],
@@ -79,6 +80,18 @@ def test_save_complete_draft_and_read_back_parent():
     loaded = AssignmentDraftRepository(connection).get_draft_by_id("tenant-a", saved.id)
     assert loaded is not None and loaded.id == saved.id and loaded.task_title == "Prepare response"
     assert loaded.source_document_id == "DOC-1" and loaded.source_revision == "REV-1"
+
+
+def test_source_document_metadata_persists_and_round_trips():
+    candidate = _candidate()
+    from dataclasses import replace
+
+    saved = AssignmentDraftRepository(_connection()).save_draft_candidate(replace(
+        candidate, document_number="Số 12/VP", subject="Trích yếu văn bản", issuing_agency="Cơ quan ban hành",
+    ))
+    assert (saved.document_number, saved.subject, saved.issuing_agency) == (
+        "Số 12/VP", "Trích yếu văn bản", "Cơ quan ban hành",
+    )
 
 
 def test_read_back_returns_stable_personnel_order():

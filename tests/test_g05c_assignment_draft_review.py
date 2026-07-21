@@ -26,6 +26,7 @@ def _candidate(tenant="tenant-a"):
         "Original content", "UNIT-A", ("UNIT-B",), ("LEADER", "LEAD_EXECUTOR"), people, "2026-07-20", "2026-07-25",
         "NORMAL", ("Output",), ("Review",), ("Milestone",), (), (), 85, (("g05a", "g05a.engine.1"),),
         (("g05a", "a" * 64),), "b" * 64, "c" * 64,
+        document_number="12/VP", subject="Official subject", issuing_agency="Issuing agency",
     )
 
 
@@ -57,6 +58,16 @@ def test_revision_keeps_old_snapshot_unchanged_and_changes_json_is_minimal():
     loaded = AssignmentDraftRepository(connection).get_draft_by_id("tenant-a", old.id)
     changes = connection.execute("SELECT changes_json FROM assignment_draft_review_events WHERE draft_id=?", (old.id,)).fetchone()[0]
     assert loaded.task_title == "Original title" and changes == '{"task_title":"Revised title"}'
+
+
+def test_office_revision_preserves_source_metadata_and_rejects_metadata_edits():
+    _, old, service = _saved_service()
+    revised = service.create_office_revision("tenant-a", old.id, "OFFICE-1", None, {"task_title": "Revised"})
+    assert (revised.document_number, revised.subject, revised.issuing_agency) == (
+        "12/VP", "Official subject", "Issuing agency",
+    )
+    with pytest.raises(AssignmentDraftReviewError, match="unsupported office edit"):
+        service.create_office_revision("tenant-a", revised.id, "OFFICE-1", None, {"subject": "Not allowed"})
 
 
 def test_approve_and_reject_are_events_without_snapshot_update():

@@ -15,9 +15,11 @@ class _Client:
     def __init__(self, *results):
         self.results = list(results)
         self.calls = 0
+        self.last_handoff = None
 
     def send(self, handoff):
         self.calls += 1
+        self.last_handoff = handoff
         return self.results.pop(0)
 
     def planner_draft_url(self, planner_draft_id):
@@ -35,6 +37,7 @@ def _candidate() -> AssignmentDraftCandidate:
         checklist_items=(), milestones=(), warnings=(), unresolved_items=(), overall_confidence=90,
         source_engine_versions=(("g05", "1"),), source_fingerprints=(("g05", "a" * 64),),
         source_input_fingerprint="a" * 64, draft_content_fingerprint="b" * 64,
+        document_number="12/VP", subject="Official subject", issuing_agency="Issuing agency",
     )
 
 
@@ -63,6 +66,21 @@ def test_created_is_persisted_with_one_append_only_attempt_and_survives_reload(t
     assert reloaded.planner_handoff_result == "CREATED" and reloaded.planner_handoff_correlation_id == "correlation-1"
     assert len(reloaded.planner_handoff_attempts) == 1
     assert reloaded.planner_handoff_attempts[0].result == "CREATED"
+
+
+def test_handoff_uses_persisted_source_metadata_without_creating_a_second_draft(tmp_path):
+    client = _Client(_result(PlannerHandoffOutcome.CREATED))
+    service, draft = _service_with_draft(tmp_path, client)
+    service.send_draft_to_planner("tenant-a", draft.id)
+    payload = client.last_handoff.to_planner_receiver_payload()
+    assert (payload["documentNumber"], payload["subject"], payload["issuingAgency"]) == (
+        "12/VP", "Official subject", "Issuing agency",
+    )
+    reloaded = AssignmentDraftService(str(tmp_path)).get_draft_detail("tenant-a", draft.id)
+    assert reloaded.planner_handoff_status == "SENT"
+    assert (reloaded.document_number, reloaded.subject, reloaded.issuing_agency) == (
+        "12/VP", "Official subject", "Issuing agency",
+    )
 
 
 def test_duplicate_appends_without_overwriting_created_attempt_or_duplicate_draft(tmp_path):
@@ -148,6 +166,10 @@ def test_schema_upgrade_adds_handoff_columns_to_a_pre_b8a_assignment_draft_datab
         init_assignment_draft_schema(connection)
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(assignment_drafts)").fetchall()}
         assert {"planner_handoff_status", "planner_draft_id", "planner_handoff_at", "planner_handoff_result"} <= columns
+        assert {"document_number", "subject", "issuing_agency"} <= columns
+        assert connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version='g05c_assignment_draft_source_metadata_1'"
+        ).fetchone()
         assert connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='assignment_draft_planner_handoff_attempts'").fetchone()
     finally:
         connection.close()

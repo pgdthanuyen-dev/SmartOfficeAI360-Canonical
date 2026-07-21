@@ -19,6 +19,7 @@ def _draft(title="Demo draft"):
         deliverables=("Output",), checklist_items=("Check",), milestones=("Milestone",),
         warnings=({"code": "DEMO_WARNING", "severity": "WARNING", "field_or_role": None, "message": "Do not export this text"},),
         overall_confidence=85.0, source_input_fingerprint="a" * 64, draft_content_fingerprint="b" * 64,
+        document_number="12/VP", subject="Official source subject", issuing_agency="Official issuing agency",
     )
 
 
@@ -33,6 +34,25 @@ def test_handoff_contains_required_draft_fields_without_credentials_or_warning_m
 def test_handoff_idempotency_key_is_stable_for_the_same_draft_content():
     assert build_planner_handoff(_draft()).idempotency_key == build_planner_handoff(_draft()).idempotency_key
     assert build_planner_handoff(_draft("Changed")).idempotency_key == build_planner_handoff(_draft()).idempotency_key
+
+
+def test_handoff_maps_exact_source_metadata_without_using_task_or_unit_values():
+    payload = build_planner_handoff(_draft("Different task title")).to_planner_receiver_payload()
+    assert payload["documentNumber"] == "12/VP"
+    assert payload["subject"] == "Official source subject"
+    assert payload["issuingAgency"] == "Official issuing agency"
+    assert payload["subject"] != payload["taskTitle"]
+    assert payload["issuingAgency"] != payload["leadUnitSourceKey"]
+    changed = _draft()
+    changed.document_number, changed.subject, changed.issuing_agency = "99/VP", "Changed subject", "Changed agency"
+    assert build_planner_handoff(changed).idempotency_key == build_planner_handoff(_draft()).idempotency_key
+
+
+def test_legacy_snapshot_without_source_metadata_remains_valid_for_nullable_receiver_fields():
+    legacy = _draft()
+    legacy.document_number = legacy.subject = legacy.issuing_agency = None
+    payload = build_planner_handoff(legacy).to_planner_receiver_payload()
+    assert payload["documentNumber"] is None and payload["subject"] is None and payload["issuingAgency"] is None
 
 
 def test_handoff_adapts_only_normalized_g05_fields_to_the_planner_receiver_contract():
