@@ -218,8 +218,15 @@ def test_no_external_identity_or_binary_columns() -> None:
             for table in ("assignment_drafts", "assignment_draft_personnel")
             for row in conn.execute(f"PRAGMA table_info({table})")
         }
+        allowed_planner_handoff_columns = {
+            "planner_handoff_status", "planner_draft_id", "planner_handoff_at", "planner_handoff_result",
+            "planner_handoff_correlation_id", "planner_handoff_error",
+        }
         forbidden = ("planner", "sharepoint", "microsoft", "token", "binary", "base64", "blob", "email")
-        assert not any(term in column for term in forbidden for column in columns)
+        assert not any(
+            term in column and column not in allowed_planner_handoff_columns
+            for term in forbidden for column in columns
+        )
     finally:
         conn.close()
 

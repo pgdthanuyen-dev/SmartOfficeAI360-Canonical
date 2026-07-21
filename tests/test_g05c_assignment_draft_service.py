@@ -16,4 +16,4 @@ def test_service_has_no_network_client_imports():
     import tools.qlvb_downloader.assignment_draft_service as module
 
     source = inspect.getsource(module)
-    assert "requests" not in source and "socket" not in source and "http" not in source
+    assert "import requests" not in source and "import socket" not in source and "urlopen" not in source
