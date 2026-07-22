@@ -141,10 +141,11 @@ class AssignmentDraftReviewService:
             source_engine_versions=tuple(sorted(draft.source_engine_versions.items())), source_fingerprints=tuple(sorted(draft.source_fingerprints.items())),
             source_input_fingerprint=draft.source_input_fingerprint, draft_content_fingerprint="", builder_version=draft.builder_version,
             document_number=draft.document_number, subject=draft.subject, issuing_agency=draft.issuing_agency,
+            issued_date=draft.issued_date, summary=draft.summary, source_attachments=draft.source_attachments,
         )
         content = asdict(candidate)
         content.pop("draft_content_fingerprint")
-        for field in ("document_number", "subject", "issuing_agency"):
+        for field in ("document_number", "subject", "issuing_agency", "issued_date", "summary", "source_attachments"):
             content.pop(field)
         fingerprint = hashlib.sha256(json.dumps(content, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return replace(candidate, draft_content_fingerprint=fingerprint), changes

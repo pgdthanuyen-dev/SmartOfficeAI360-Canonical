@@ -57,8 +57,23 @@ class AssignmentDraftService:
                 raise AssignmentDraftServiceError("Khong tim thay du thao.")
             if draft.current_status != PENDING_OFFICE_REVIEW:
                 raise AssignmentDraftServiceError("Du thao khong con cho gui Planner.")
-            handoff = build_planner_handoff(draft)
             started_at, started = utc_now_iso(), monotonic()
+            try:
+                handoff = build_planner_handoff(draft)
+                handoff.to_planner_receiver_payload()
+            except Exception:
+                attempt = PlannerHandoffAttempt(
+                    started_at=started_at, completed_at=utc_now_iso(), result=PlannerHandoffOutcome.VALIDATION_ERROR.value,
+                    planner_draft_id=None, correlation_id="local-validation", http_status=None,
+                    duration_ms=max(0, int((monotonic() - started) * 1000)), error_code=PlannerHandoffOutcome.VALIDATION_ERROR.value,
+                    error_message="SmartOffice source metadata did not satisfy the Planner draft contract.",
+                    idempotency_key_hash=build_planner_handoff(draft).idempotency_key,
+                )
+                repository.record_planner_handoff_attempt(active_tenant_id, draft_id, attempt)
+                return PlannerHandoffResult(
+                    PlannerHandoffOutcome.VALIDATION_ERROR, "local-validation",
+                    message="SmartOffice source metadata did not satisfy the Planner draft contract.",
+                )
             result = self._handoff_client.send(handoff)
             attempt = PlannerHandoffAttempt(
                 started_at=started_at, completed_at=utc_now_iso(), result=result.outcome.value,

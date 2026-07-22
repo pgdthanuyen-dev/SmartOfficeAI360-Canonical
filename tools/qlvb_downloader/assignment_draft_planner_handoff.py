@@ -7,10 +7,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .assignment_draft_models import AssignmentDraftSourceAttachment
+from .assignment_draft_source_metadata import normalize_source_attachments
+from .assignment_draft_validation import MAX_SUMMARY_LENGTH, normalize_date, normalize_optional_text, normalize_text
+
 
 PENDING_OFFICE_REVIEW = "PENDING_OFFICE_REVIEW"
 PLANNER_RECEIVER_PATH = "/api/integrations/smartoffice/drafts"
-SMARTOFFICE_SOURCE_SYSTEM = "SmartOfficeAI360"
 
 
 def planner_display_status(current_status: str) -> str:
@@ -56,13 +59,29 @@ class PlannerDraftHandoff:
     document_number: str | None
     subject: str | None
     issuing_agency: str | None
+    issued_date: str | None
+    summary: str | None
+    source_attachments: tuple[dict[str, Any], ...]
 
     def to_planner_receiver_payload(self) -> dict[str, Any]:
         """Adapt the credential-free G05C snapshot to Planner's B6 receiver."""
 
+        source_system = normalize_text(self.source_system, "source_system", 200, required=True)
+        issued_date = normalize_date(self.issued_date, "issued_date")
+        summary = normalize_optional_text(self.summary, "summary", MAX_SUMMARY_LENGTH)
+        attachments = normalize_source_attachments(
+            AssignmentDraftSourceAttachment(
+                source_attachment_id=attachment.get("source_attachment_id"),
+                file_name=attachment.get("file_name"),
+                mime_type=attachment.get("mime_type"),
+                size_bytes=attachment.get("size_bytes"),
+                checksum=attachment.get("checksum"),
+            )
+            for attachment in self.source_attachments
+        )
         return {
             "tenantId": self.tenant_id,
-            "sourceSystem": SMARTOFFICE_SOURCE_SYSTEM,
+            "sourceSystem": source_system,
             "sourceDocumentId": self.source_document_id,
             "sourceRevision": self.source_revision,
             "smartOfficeDraftId": self.draft_id,
@@ -72,6 +91,18 @@ class PlannerDraftHandoff:
             "documentNumber": self.document_number,
             "subject": self.subject,
             "issuingAgency": self.issuing_agency,
+            "issuedDate": issued_date,
+            "summary": summary,
+            "sourceAttachments": [
+                {key: value for key, value in {
+                    "sourceAttachmentId": attachment.source_attachment_id,
+                    "fileName": attachment.file_name,
+                    "mimeType": attachment.mime_type,
+                    "sizeBytes": attachment.size_bytes,
+                    "checksum": attachment.checksum,
+                }.items() if value is not None}
+                for attachment in attachments
+            ],
             "leadUnitSourceKey": self.lead_unit_source_key,
             "proposedStartDate": self.proposed_start_date,
             "proposedDueDate": self.proposed_due_date,
@@ -134,4 +165,12 @@ def build_planner_handoff(draft: Any) -> PlannerDraftHandoff:
         draft_content_fingerprint=draft.draft_content_fingerprint, idempotency_key=idempotency_key,
         document_number=getattr(draft, "document_number", None), subject=getattr(draft, "subject", None),
         issuing_agency=getattr(draft, "issuing_agency", None),
+        issued_date=getattr(draft, "issued_date", None), summary=getattr(draft, "summary", None),
+        source_attachments=tuple({
+            "source_attachment_id": attachment.source_attachment_id,
+            "file_name": attachment.file_name,
+            "mime_type": attachment.mime_type,
+            "size_bytes": attachment.size_bytes,
+            "checksum": attachment.checksum,
+        } for attachment in getattr(draft, "source_attachments", ())),
     )

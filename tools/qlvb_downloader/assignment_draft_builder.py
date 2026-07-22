@@ -13,6 +13,7 @@ from .assignment_draft_models import (
     AssignmentDraftBuildRequest,
     AssignmentDraftCandidate,
     AssignmentDraftPersonnelProposal,
+    AssignmentDraftSourceAttachment,
     AssignmentDraftWarning,
 )
 from .assignment_draft_validation import (
@@ -21,6 +22,7 @@ from .assignment_draft_validation import (
     MAX_DOCUMENT_NUMBER_LENGTH,
     MAX_ISSUING_AGENCY_LENGTH,
     MAX_MILESTONES,
+    MAX_SUMMARY_LENGTH,
     MAX_SUBJECT_LENGTH,
     MAX_UNIT_KEY_LENGTH,
     MAX_WARNING_ACTION_LENGTH,
@@ -36,6 +38,7 @@ from .assignment_draft_validation import (
     validate_build_request,
     AssignmentDraftValidationError,
 )
+from .assignment_draft_source_metadata import normalize_source_attachments
 
 
 _ROLE_ORDER = {"LEADER": 0, "MONITOR": 1, "LEAD_EXECUTOR": 2, "CO_EXECUTOR": 3}
@@ -66,7 +69,7 @@ def _warning(code: str, field_or_role: str | None, message: str, action: str) ->
 class AssignmentDraftBuilder:
     """Merge G05A and G05B proposals without persistence or external calls."""
 
-    def build(self, request: AssignmentDraftBuildRequest) -> AssignmentDraftCandidate:
+    def build(self, request: AssignmentDraftBuildRequest, *, source_attachments: tuple[AssignmentDraftSourceAttachment, ...] = ()) -> AssignmentDraftCandidate:
         validate_build_request(request)
         g05a = proposal_recommendation(request.g05a_proposal)
         g05b = proposal_recommendation(request.g05b_proposal)
@@ -79,6 +82,9 @@ class AssignmentDraftBuilder:
         title = normalize_text(request.proposed_task_title, "proposed_task_title", 300, required=True)
         description = normalize_text(request.proposed_task_description, "proposed_task_description", 10_000)
         received_date = normalize_date(request.received_date, "received_date")
+        issued_date = normalize_date(request.issued_date, "issued_date")
+        summary = normalize_optional_text(request.normalized_summary, "normalized_summary", MAX_SUMMARY_LENGTH)
+        attachments = normalize_source_attachments(source_attachments)
         start_date = normalize_date(request.proposed_start_date, "proposed_start_date")
         due_date = normalize_date(request.proposed_due_date, "proposed_due_date")
         priority = normalize_priority(request.proposed_priority)
@@ -118,11 +124,12 @@ class AssignmentDraftBuilder:
             source_fingerprints=source_fingerprints, source_input_fingerprint=source_input_fingerprint,
             draft_content_fingerprint="", builder_version=ASSIGNMENT_DRAFT_BUILDER_VERSION,
             document_number=document_number, subject=subject, issuing_agency=issuing_agency,
+            issued_date=issued_date, summary=summary, source_attachments=attachments,
         )
         content = asdict(candidate)
         content.pop("draft_content_fingerprint")
         # Source display metadata is not part of the existing B7 idempotency material.
-        for field in ("document_number", "subject", "issuing_agency"):
+        for field in ("document_number", "subject", "issuing_agency", "issued_date", "summary", "source_attachments"):
             content.pop(field)
         return replace(candidate, draft_content_fingerprint=_sha256(content))
 
@@ -197,3 +204,18 @@ class AssignmentDraftBuilder:
 
 def build_assignment_draft(request: AssignmentDraftBuildRequest) -> AssignmentDraftCandidate:
     return AssignmentDraftBuilder().build(request)
+
+
+def build_assignment_draft_from_canonical_source(request: AssignmentDraftBuildRequest, connection: Any) -> AssignmentDraftCandidate:
+    """Build from backend-owned G02 source metadata, never from frontend input."""
+
+    from .assignment_draft_source_metadata import load_canonical_source_attachments
+
+    attachments = load_canonical_source_attachments(
+        connection,
+        tenant_id=request.tenant_id,
+        source_system=request.source_system,
+        source_document_id=request.source_document_id,
+        source_revision=request.source_revision,
+    )
+    return AssignmentDraftBuilder().build(request, source_attachments=attachments)

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .assignment_draft_models import AssignmentDraftCandidate, AssignmentDraftPersonnelProposal
+from .assignment_draft_models import AssignmentDraftCandidate, AssignmentDraftPersonnelProposal, AssignmentDraftSourceAttachment
 from .domain_models import new_id, utc_now_iso
 from .personnel_directory_repository import init_personnel_directory_schema
 
@@ -17,6 +17,7 @@ ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION = "g05c_assignment_draft_mvp_schema_1"
 ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION = "g05c_assignment_draft_review_events_1"
 ASSIGNMENT_DRAFT_HANDOFF_MIGRATION_VERSION = "g05c_assignment_draft_planner_handoff_1"
 ASSIGNMENT_DRAFT_SOURCE_METADATA_MIGRATION_VERSION = "g05c_assignment_draft_source_metadata_1"
+ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION = "g05c_assignment_draft_extended_source_payload_1"
 MIGRATION_RUNTIME_ENTRYPOINT = "LIBRARY_ONLY"
 
 _SHA256_CHECK = "length({field}) = 64 AND {field} NOT GLOB '*[^0-9a-f]*'"
@@ -37,6 +38,9 @@ _CREATE_TABLES_SQL = [
         document_number TEXT CHECK(length(document_number) <= 500),
         subject TEXT CHECK(length(subject) <= 1000),
         issuing_agency TEXT CHECK(length(issuing_agency) <= 500),
+        issued_date TEXT,
+        summary TEXT CHECK(length(summary) <= 10000),
+        source_attachments_json TEXT NOT NULL DEFAULT '[]' CHECK(length(source_attachments_json) <= 24000 AND json_valid(source_attachments_json)),
         lead_unit_source_key TEXT CHECK(length(lead_unit_source_key) <= 500),
         proposed_start_date TEXT,
         proposed_due_date TEXT,
@@ -156,6 +160,10 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (ASSIGNMENT_DRAFT_SOURCE_METADATA_MIGRATION_VERSION, utc_now_iso()),
     )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        (ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION, utc_now_iso()),
+    )
     conn.commit()
 
 
@@ -180,7 +188,11 @@ def _upgrade_source_metadata_columns(conn: sqlite3.Connection) -> None:
     """Add nullable source metadata without rewriting legacy snapshots."""
 
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(assignment_drafts)").fetchall()}
-    additions = {"document_number": "TEXT", "subject": "TEXT", "issuing_agency": "TEXT"}
+    additions = {
+        "document_number": "TEXT", "subject": "TEXT", "issuing_agency": "TEXT",
+        "issued_date": "TEXT", "summary": "TEXT",
+        "source_attachments_json": "TEXT NOT NULL DEFAULT '[]'",
+    }
     for name, definition in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE assignment_drafts ADD COLUMN {name} {definition}")
@@ -231,6 +243,9 @@ class StoredAssignmentDraft:
     document_number: str | None
     subject: str | None
     issuing_agency: str | None
+    issued_date: str | None
+    summary: str | None
+    source_attachments: tuple[AssignmentDraftSourceAttachment, ...]
     lead_unit_source_key: str | None
     proposed_start_date: str | None
     proposed_due_date: str | None
@@ -420,19 +435,20 @@ class AssignmentDraftRepository:
             INSERT INTO assignment_drafts (
                 id, tenant_id, source_system, source_document_id, source_revision, source_identity_key,
                 draft_version, initial_status, task_title, task_description, lead_unit_source_key,
-                document_number, subject, issuing_agency,
+                document_number, subject, issuing_agency, issued_date, summary, source_attachments_json,
                 proposed_start_date, proposed_due_date, priority, overall_confidence,
                 source_input_fingerprint, draft_content_fingerprint, participating_units_json,
                 deliverables_json, checklist_items_json, milestones_json, warnings_json,
                 unresolved_items_json, source_engine_versions_json, source_fingerprints_json,
                 supersedes_draft_id, created_at, created_by_system, schema_version, builder_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 draft_id, candidate.tenant_id, candidate.source_system, candidate.source_document_id,
                 candidate.source_revision, candidate.source_identity_key, draft_version, candidate.initial_status,
                 candidate.task_title, candidate.task_description, candidate.lead_unit_source_key,
                 candidate.document_number, candidate.subject, candidate.issuing_agency,
+                candidate.issued_date, candidate.summary, _json([asdict(item) for item in candidate.source_attachments]),
                 candidate.proposed_start_date, candidate.proposed_due_date, candidate.priority,
                 candidate.overall_confidence, candidate.source_input_fingerprint, candidate.draft_content_fingerprint,
                 _json(candidate.participating_unit_source_keys), _json(candidate.deliverables),
@@ -497,6 +513,8 @@ class AssignmentDraftRepository:
             initial_status=row["initial_status"], current_status=status_row["event_type"] if status_row else row["initial_status"],
             task_title=row["task_title"], task_description=row["task_description"],
             document_number=row["document_number"], subject=row["subject"], issuing_agency=row["issuing_agency"],
+            issued_date=row["issued_date"], summary=row["summary"],
+            source_attachments=tuple(AssignmentDraftSourceAttachment(**item) for item in _read_json(row["source_attachments_json"])),
             lead_unit_source_key=row["lead_unit_source_key"], proposed_start_date=row["proposed_start_date"],
             proposed_due_date=row["proposed_due_date"], priority=row["priority"],
             overall_confidence=float(row["overall_confidence"]), source_input_fingerprint=row["source_input_fingerprint"],

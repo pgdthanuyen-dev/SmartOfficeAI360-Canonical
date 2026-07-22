@@ -46,6 +46,17 @@ class AssignmentDraftPersonnelProposal:
 
 
 @dataclass(frozen=True)
+class AssignmentDraftSourceAttachment:
+    """Bounded, credential-free metadata for a canonical source attachment."""
+
+    source_attachment_id: str | None
+    file_name: str
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    checksum: str | None = None
+
+
+@dataclass(frozen=True)
 class AssignmentDraftWarning:
     code: str
     severity: str
@@ -85,3 +96,6 @@ class AssignmentDraftCandidate:
     document_number: str | None = None
     subject: str | None = None
     issuing_agency: str | None = None
+    issued_date: str | None = None
+    summary: str | None = None
+    source_attachments: tuple[AssignmentDraftSourceAttachment, ...] = ()
