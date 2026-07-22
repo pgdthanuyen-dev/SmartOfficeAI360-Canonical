@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from tools.qlvb_downloader.assignment_draft_repository import (
+    ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION,
     ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION,
     _CREATE_TABLES_SQL,
     init_assignment_draft_schema,
@@ -90,6 +91,13 @@ def test_migration_is_additive_and_idempotent() -> None:
             (ASSIGNMENT_DRAFT_MVP_MIGRATION_VERSION,),
         ).fetchone()
         assert row["count"] == 1
+        extended = conn.execute(
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?",
+            (ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION,),
+        ).fetchone()
+        assert extended["count"] == 1
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(assignment_drafts)")}
+        assert {"issued_date", "summary", "source_attachments_json"} <= columns
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='assignment_rules'").fetchone()
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personnel_records'").fetchone()
     finally:

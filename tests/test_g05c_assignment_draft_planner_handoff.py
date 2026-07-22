@@ -57,7 +57,7 @@ def test_legacy_snapshot_without_source_metadata_remains_valid_for_nullable_rece
 
 def test_handoff_adapts_only_normalized_g05_fields_to_the_planner_receiver_contract():
     payload = build_planner_handoff(_draft()).to_planner_receiver_payload()
-    assert payload["sourceSystem"] == "SmartOfficeAI360"
+    assert payload["sourceSystem"] == "demo"
     assert payload["smartOfficeDraftId"] == "draft-1"
     assert payload["personnel"] == [{
         "roleType": "LEAD_EXECUTOR", "personnelSourceKey": "PERSON-1", "confidence": 0.8,
