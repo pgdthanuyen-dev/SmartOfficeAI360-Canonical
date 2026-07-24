@@ -47,3 +47,7 @@ def test_g02_and_trust_memory_is_registered_and_source_anchored():
     ):
         assert path in manifest
         assert "LIVE_VERIFIED" not in (ROOT / "ai-memory" / path).read_text(encoding="utf-8")
+
+
+def test_storage_lifecycle_memory_is_registered():
+    assert (ROOT / "ai-memory/03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md").is_file()

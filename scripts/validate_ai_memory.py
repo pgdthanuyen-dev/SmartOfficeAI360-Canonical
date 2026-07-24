@@ -40,6 +40,7 @@ REQUIRED = [
     "ai-memory/03-architecture/NEOREMOTING_CONTRACT.md",
     "ai-memory/03-architecture/DOWNLOAD_PIPELINE.md",
     "ai-memory/03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
+    "ai-memory/03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md",
     "ai-memory/04-engineering/ENGINEERING_RULES.md",
     "ai-memory/04-engineering/FORBIDDEN_ACTIONS.md",
     "ai-memory/04-engineering/TEST_STRATEGY.md",

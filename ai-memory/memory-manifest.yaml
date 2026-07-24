@@ -38,6 +38,7 @@ deep_reference:
   - 02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md
   - 03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md
   - 04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md
+  - 03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md
 last_verified_commit: ea39c35a27b399fe5c049b3d4545db2322142ac9
 last_verified_application_commit: 768dcebc07eddf5c704e395b7eaad8426b286c91
 verification:

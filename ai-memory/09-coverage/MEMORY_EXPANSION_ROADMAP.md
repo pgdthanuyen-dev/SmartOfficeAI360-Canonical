@@ -12,7 +12,7 @@ This roadmap prioritizes documentation work only. A wave must be sourced from co
 - Risk if absent: incorrect lifecycle/state assumptions can cause unsafe migrations, handling, or evidence overclaims.
 
 1. **G02 domain schema — completed in R52.** Source/test anchored domain, migration, and compatibility documents now cover the in-repository contract; this is not production migration evidence.
-2. **Storage/queue lifecycle and data retention.** Document manifest ownership, queue validation, recovery limits, and retention classification from source/tests before expanding processing boundaries.
+2. **Storage/queue lifecycle — completed source documentation.** R53 records manifest ownership, validated-attachment readiness, compatibility, and recovery limits. Retention, backup/restore, and operator policy remain P0 gaps.
 3. **QLVB change control.** Keep the existing CDP, NeoRemoting, and download documents as the only live-verified scope; add a concise operator error mapping only if it can cite source/tests.
 
 Exit evidence: validator passes; no claim that G02 migrations have been run against live data; storage/queue retention remains the next P0 evidence task.
