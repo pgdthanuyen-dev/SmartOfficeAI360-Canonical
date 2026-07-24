@@ -7,15 +7,21 @@ required_read_order:
   - 02-domain/QLVB_BUSINESS_WORKFLOW.md
   - 02-domain/QLVB_DOMAIN.md
   - 03-architecture/SYSTEM_ARCHITECTURE.md
+  - 03-architecture/MODULE_MAP.md
+  - 03-architecture/ENTRY_POINTS.md
+  - 03-architecture/CONFIGURATION_CONTRACT.md
+  - 03-architecture/ERROR_MODEL.md
   - 03-architecture/CDP_ARCHITECTURE.md
   - 03-architecture/NEOREMOTING_CONTRACT.md
   - 03-architecture/DOWNLOAD_PIPELINE.md
   - 03-architecture/ARCHITECTURE.md
   - 04-engineering/FORBIDDEN_ACTIONS.md
   - 04-engineering/TEST_STRATEGY.md
+  - 04-engineering/TEST_COVERAGE_MAP.md
   - 04-engineering/SECURITY_RULES.md
   - 04-engineering/ENGINEERING_RULES.md
   - 05-operations/RUNBOOK_CDP.md
+  - 05-operations/COMMAND_REFERENCE.md
   - 05-operations/TROUBLESHOOTING.md
   - 05-operations/OPERATIONS.md
   - 06-decisions/ADR-001-USE-EXTERNAL-EDGE-CDP.md
