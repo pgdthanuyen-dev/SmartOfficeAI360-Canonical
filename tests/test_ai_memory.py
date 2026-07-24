@@ -17,6 +17,8 @@ def test_memory_validator_passes():
 def test_manifest_commit_is_stable():
     text = (ROOT / "ai-memory/memory-manifest.yaml").read_text(encoding="utf-8")
     assert "ea39c35a27b399fe5c049b3d4545db2322142ac9" in text
+    assert "768dcebc07eddf5c704e395b7eaad8426b286c91" in text
+    assert "50fd0db8403026c65f06b94323b67e90164b31b4" in text
 
 
 def test_security_scan_ignores_guidance_but_rejects_secret_assignments():

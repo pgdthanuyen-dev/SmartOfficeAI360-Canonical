@@ -68,6 +68,8 @@ MANIFEST_KEYS = {
     "language",
     "required_read_order",
     "last_verified_commit",
+    "last_verified_application_commit",
+    "verification",
     "protected_invariants",
     "forbidden_actions",
     "validation_commands",
@@ -121,6 +123,19 @@ def validate(root: Path = ROOT) -> list[str]:
         verified = str(manifest.get("last_verified_commit", ""))
         if not HASH_RE.fullmatch(verified):
             errors.append("manifest last_verified_commit is not a 40-character hash")
+        application_commit = str(manifest.get("last_verified_application_commit", ""))
+        if not HASH_RE.fullmatch(application_commit):
+            errors.append("manifest last_verified_application_commit is not a 40-character hash")
+        verification = manifest.get("verification")
+        if not isinstance(verification, dict):
+            errors.append("manifest verification must be a mapping")
+        else:
+            for key in ("main_commit", "originating_live_verified_commit", "focused_tests", "live_acceptance"):
+                if key not in verification:
+                    errors.append(f"manifest verification missing key: {key}")
+            for key in ("main_commit", "originating_live_verified_commit"):
+                if not HASH_RE.fullmatch(str(verification.get(key, ""))):
+                    errors.append(f"manifest verification {key} is not a 40-character hash")
 
     memory_files = [path for path in required if path.suffix.lower() in {".md", ".yaml"}]
     for path in memory_files:
