@@ -102,6 +102,7 @@ class QLVBConfig:
     username: str = ""
     password: str = ""
     remember_password: bool = False
+    incoming_registry_url: str = ""
     incoming_pending_url: str = ""
     incoming_processed_url: str = ""
     outgoing_issued_url: str = ""
@@ -171,6 +172,7 @@ def normalize_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
         "login_url": ["login_url", "url_dang_nhap", "login"],
         "username": ["username", "user", "ten_dang_nhap", "tai_khoan", "account"],
         "password": ["password", "pass", "mat_khau"],
+        "incoming_registry_url": ["incoming_registry_url", "link_van_ban_vao_so", "van_ban_vao_so_url"],
         "incoming_pending_url": ["incoming_pending_url", "incoming_url", "link_van_ban_den", "link_den", "url_incoming", "van_ban_den_url", "van_ban_den_cho_xu_ly"],
         "incoming_processed_url": ["incoming_processed_url", "link_van_ban_den_da_xu_ly"],
         "outgoing_issued_url": ["outgoing_issued_url", "outgoing_url", "link_van_ban_di", "link_di", "url_outgoing", "van_ban_di_url"],
@@ -253,6 +255,7 @@ def load_config(path: Path | None = None) -> QLVBConfig:
         username=raw.get("username", ""),
         password=password,
         remember_password=bool(raw.get("remember_password", False)),
+        incoming_registry_url=raw.get("incoming_registry_url", ""),
         incoming_pending_url=raw.get("incoming_pending_url", ""),
         incoming_processed_url=raw.get("incoming_processed_url", ""),
         outgoing_issued_url=raw.get("outgoing_issued_url", ""),
@@ -284,6 +287,7 @@ def save_config(cfg: QLVBConfig, path: Path | None = None) -> Path:
         "username": cfg.username,
         "password": cfg.password if cfg.remember_password else "",
         "remember_password": cfg.remember_password,
+        "incoming_registry_url": cfg.incoming_registry_url,
         "incoming_pending_url": cfg.incoming_pending_url,
         "incoming_processed_url": cfg.incoming_processed_url,
         "outgoing_issued_url": cfg.outgoing_issued_url,

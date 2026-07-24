@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tools.qlvb_downloader.config import VERSION, load_config
 from tools.qlvb_downloader.downloader import QLVBDownloader
+from tools.qlvb_downloader.models import mask_url_query
 
 
 def parse_bool(value: str | bool | None) -> bool | None:
@@ -38,6 +39,8 @@ def main() -> None:
     parser.add_argument("--print-config", action="store_true", help="Chỉ kiểm tra và in cấu hình đã chuẩn hóa, không mở trình duyệt")
     parser.add_argument("--dry-run", default=None, type=parse_bool, help="true: chỉ quét metadata, không tải file")
     parser.add_argument("--login-only", action="store_true", help="Chỉ mở trình duyệt để người dùng đăng nhập/giải captcha rồi thoát")
+    parser.add_argument("--cdp-three-category-smoke", action="store_true", help="Attach to an already-authenticated Edge CDP session and run the bounded QLVB three-category smoke.")
+    parser.add_argument("--cdp-output-dir", default="", help="Output directory for --cdp-three-category-smoke downloads.")
     args = parser.parse_args()
 
     config_path = Path(args.config) if args.config else None
@@ -56,7 +59,8 @@ def main() -> None:
             "login_url": cfg.login_url,
             "username": cfg.username,
             "password_saved": bool(cfg.password),
-            "incoming_pending_url": cfg.incoming_pending_url,
+            "incoming_registry_url": cfg.incoming_registry_url,
+            "incoming_pending_url_legacy": cfg.incoming_pending_url,
             "incoming_processed_url": cfg.incoming_processed_url,
             "outgoing_issued_url": cfg.outgoing_issued_url,
             "save_root": str(cfg.root_path),
@@ -66,6 +70,14 @@ def main() -> None:
         }
         print(json.dumps(safe, ensure_ascii=False, indent=2))
         return
+
+    if args.cdp_three_category_smoke:
+        import sys
+
+        downloader = QLVBDownloader(cfg)
+        output_dir = Path(args.cdp_output_dir) if args.cdp_output_dir else None
+        summary = downloader.run_cdp_three_category_smoke(output_dir=output_dir)
+        sys.exit(0 if summary.get("LIVE_ACCEPTANCE") == "PASS" else 1)
 
     directions = ["incoming", "outgoing"] if args.directions == "both" else [args.directions]
 
