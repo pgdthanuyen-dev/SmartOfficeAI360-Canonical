@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import os
+import tempfile
 import time
 import unicodedata
 import zipfile
@@ -40,6 +42,19 @@ class CdpCategory:
     index: int
     label: str
     slug: str
+
+
+@dataclass(frozen=True)
+class DownloadResult:
+    http_status: int
+    content_type: str
+    body_length: int
+    signature: str
+    integrity: str
+    session_expired: bool
+    persisted: bool
+    failure_code: str = ""
+    final_path: Path | None = None
 
 
 CATEGORY_ORDER: tuple[CdpCategory, ...] = (
@@ -560,20 +575,70 @@ def validate_integrity(path: Path, body: bytes, signature: str) -> str:
                 return "PASS" if archive.testzip() is None else "FAIL"
         except zipfile.BadZipFile:
             return "FAIL"
-    return "PASS"
+    if signature == "OLE":
+        return "PASS" if body.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else "FAIL"
+    return "FAIL"
 
 
-def download_one(page: Any, category_dir: Path, attachment: dict[str, str]) -> tuple[int, int, str, bool]:
+def _safe_final_path(category_dir: Path, attachment_name: object) -> Path:
+    directory = category_dir.resolve()
+    candidate = (directory / safe_filename(attachment_name)).resolve()
+    if candidate.parent != directory:
+        raise RuntimeError("DOWNLOAD_PATH_OUTSIDE_OUTPUT_DIRECTORY")
+    if not candidate.exists():
+        return candidate
+    suffix = candidate.suffix
+    stem = candidate.stem or "attachment"
+    for index in range(1, 10000):
+        alternative = (directory / f"{stem}-{index}{suffix}").resolve()
+        if alternative.parent == directory and not alternative.exists():
+            return alternative
+    raise RuntimeError("DOWNLOAD_OUTPUT_NAME_EXHAUSTED")
+
+
+def download_one(page: Any, category_dir: Path, attachment: dict[str, str]) -> DownloadResult:
     url = build_legacy_download_url(str(page.url), attachment["name"], attachment["hdd_file"], attachment.get("type", "vb"))
     response = page.context.request.get(url, timeout=30000)
     body = response.body()
     content_type = str(response.headers.get("content-type", ""))
-    session_expired = int(response.status) in {401, 403} or detect_login_html(body, content_type) or "login" in str(response.url).lower()
-    path = category_dir / safe_filename(attachment["name"])
-    path.write_bytes(body)
+    status = int(response.status)
+    login_html = detect_login_html(body, content_type) or "login" in str(response.url).lower()
+    session_expired = status in {401, 403} or login_html
+    if status in {401, 403}:
+        return DownloadResult(status, content_type, len(body), "UNKNOWN", "FAIL", True, False, "SESSION_EXPIRED")
+    if status != 200:
+        return DownloadResult(status, content_type, len(body), "UNKNOWN", "FAIL", False, False, "HTTP_DOWNLOAD_FAILED")
+    if not body:
+        return DownloadResult(status, content_type, 0, "UNKNOWN", "FAIL", session_expired, False, "EMPTY_RESPONSE_BODY")
+    if login_html:
+        return DownloadResult(status, content_type, len(body), "UNKNOWN", "FAIL", True, False, "LOGIN_HTML_DETECTED")
     signature = body_signature(body)
-    integrity = validate_integrity(path, body, signature)
-    return int(response.status), path.stat().st_size if path.exists() else 0, integrity, session_expired
+    if signature == "UNKNOWN":
+        return DownloadResult(status, content_type, len(body), signature, "FAIL", False, False, "UNSUPPORTED_OR_UNKNOWN_FILE_SIGNATURE")
+
+    category_dir.mkdir(parents=True, exist_ok=True)
+    final_path = _safe_final_path(category_dir, attachment["name"])
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", prefix=f".{final_path.name}.part-", dir=category_dir, delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        integrity = validate_integrity(temp_path, body, signature)
+        if integrity != "PASS":
+            return DownloadResult(status, content_type, len(body), signature, integrity, False, False, "INTEGRITY_CHECK_FAILED")
+        os.replace(temp_path, final_path)
+        temp_path = None
+        return DownloadResult(status, content_type, len(body), signature, integrity, False, True, "", final_path)
+    except OSError:
+        return DownloadResult(status, content_type, len(body), signature, "FAIL", False, False, "ATOMIC_PERSISTENCE_FAILED")
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def default_output_dir(config: QLVBConfig) -> Path:
@@ -641,19 +706,20 @@ def run_cdp_three_category_smoke(
                 if not selected:
                     log(f"CATEGORY_{category.index}_RESULT: PASS_NO_ATTACHMENT_IN_BOUNDS")
                     continue
-                status, size, integrity, session_expired = download_one(page, category_dir, selected)
-                summary["CATEGORY_DOWNLOAD_COUNT"] += 1
-                if status == 200:
+                result = download_one(page, category_dir, selected)
+                if result.persisted:
+                    summary["CATEGORY_DOWNLOAD_COUNT"] += 1
+                if result.persisted and result.http_status == 200:
                     summary["DOWNLOAD_HTTP_200_COUNT"] += 1
-                if integrity == "PASS":
+                if result.persisted and result.integrity == "PASS":
                     summary["FILE_INTEGRITY_PASS_COUNT"] += 1
-                if session_expired:
+                if result.session_expired:
                     summary["SESSION_EXPIRED"] = "YES"
-                log(f"CATEGORY_{category.index}_HTTP_STATUS: {status}")
-                log(f"CATEGORY_{category.index}_FILE_SIZE: {size}")
-                log(f"CATEGORY_{category.index}_FILE_INTEGRITY: {integrity}")
-                if status != 200 or integrity != "PASS" or size <= 0 or session_expired:
-                    raise RuntimeError(f"CATEGORY_{category.index}_DOWNLOAD_INTEGRITY_FAILED")
+                log(f"CATEGORY_{category.index}_HTTP_STATUS: {result.http_status}")
+                log(f"CATEGORY_{category.index}_FILE_SIZE: {result.body_length}")
+                log(f"CATEGORY_{category.index}_FILE_INTEGRITY: {result.integrity}")
+                if not result.persisted:
+                    raise RuntimeError(f"CATEGORY_{category.index}_{result.failure_code or 'DOWNLOAD_INTEGRITY_FAILED'}")
         live_ok = (
             summary["CATEGORY_VALIDATED_COUNT"] == 3
             and summary["SESSION_EXPIRED"] == "NO"

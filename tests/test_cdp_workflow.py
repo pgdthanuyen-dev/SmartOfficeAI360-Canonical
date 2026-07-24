@@ -2,10 +2,46 @@ from __future__ import annotations
 
 import inspect
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from tools.qlvb_downloader import cdp_workflow
+
+
+class _Response:
+    def __init__(self, status: int, body: bytes, content_type: str = "application/octet-stream", url: str = "https://qlvb.example/download.jsp"):
+        self.status = status
+        self._body = body
+        self.headers = {"content-type": content_type}
+        self.url = url
+
+    def body(self) -> bytes:
+        return self._body
+
+
+class _Request:
+    def __init__(self, response: _Response):
+        self.response = response
+
+    def get(self, _url: str, timeout: int):
+        assert timeout == 30000
+        return self.response
+
+
+class _Page:
+    url = "https://qlvb.example/qlvbdh_lcu/main"
+
+    def __init__(self, response: _Response):
+        self.context = type("Context", (), {"request": _Request(response)})()
+
+
+def _attachment() -> dict[str, str]:
+    return {"name": "safe-file.bin", "hdd_file": "opaque-file-id", "type": "vb"}
+
+
+def _part_files(directory: Path) -> list[Path]:
+    return list(directory.glob("*.part-*"))
 
 
 def test_unicode_escape_labels_decode_and_mojibake_is_rejected() -> None:
@@ -73,6 +109,8 @@ def test_authenticated_direct_download_and_integrity_contracts_are_integrated() 
     assert "page.context.request.get" in source
     assert "detect_login_html" in source
     assert "validate_integrity" in source
+    assert "os.replace" in source
+    assert "NamedTemporaryFile" in source
 
 
 def test_integrity_validation_accepts_pdf_and_zip(tmp_path) -> None:
@@ -88,6 +126,75 @@ def test_integrity_validation_accepts_pdf_and_zip(tmp_path) -> None:
     zip_body = zip_path.read_bytes()
     assert cdp_workflow.body_signature(zip_body) == "ZIP"
     assert cdp_workflow.validate_integrity(zip_path, zip_body, "ZIP") == "PASS"
+
+
+def test_atomic_download_persists_valid_pdf_and_removes_temp_file(tmp_path) -> None:
+    body = b"%PDF-1.7\n%%EOF\n"
+    result = cdp_workflow.download_one(_Page(_Response(200, body)), tmp_path, _attachment())
+    assert result.persisted is True
+    assert result.signature == "PDF"
+    assert result.integrity == "PASS"
+    assert result.final_path and result.final_path.read_bytes() == body
+    assert _part_files(tmp_path) == []
+
+
+def test_atomic_download_persists_valid_zip_and_ole(tmp_path) -> None:
+    zip_source = tmp_path / "source.zip"
+    with zipfile.ZipFile(zip_source, "w") as archive:
+        archive.writestr("document.xml", "ok")
+    zip_result = cdp_workflow.download_one(_Page(_Response(200, zip_source.read_bytes())), tmp_path, _attachment())
+    assert zip_result.persisted is True and zip_result.signature == "ZIP"
+
+    ole_body = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32
+    ole_result = cdp_workflow.download_one(_Page(_Response(200, ole_body)), tmp_path, _attachment())
+    assert ole_result.persisted is True and ole_result.signature == "OLE"
+    assert _part_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("response", "failure_code"),
+    [
+        (_Response(200, b"<html><input type='password'></html>", "text/html"), "LOGIN_HTML_DETECTED"),
+        (_Response(401, b"denied"), "SESSION_EXPIRED"),
+        (_Response(403, b"denied"), "SESSION_EXPIRED"),
+        (_Response(500, b"server-error"), "HTTP_DOWNLOAD_FAILED"),
+        (_Response(200, b"not-a-supported-file"), "UNSUPPORTED_OR_UNKNOWN_FILE_SIGNATURE"),
+        (_Response(200, b""), "EMPTY_RESPONSE_BODY"),
+    ],
+)
+def test_invalid_response_is_not_persisted(tmp_path, response, failure_code) -> None:
+    result = cdp_workflow.download_one(_Page(response), tmp_path, _attachment())
+    assert result.persisted is False
+    assert result.failure_code == failure_code
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_existing_final_file_is_not_overwritten(tmp_path) -> None:
+    existing = tmp_path / "safe-file.bin"
+    existing.write_bytes(b"existing")
+    body = b"%PDF-1.7\n%%EOF\n"
+    result = cdp_workflow.download_one(_Page(_Response(200, body)), tmp_path, _attachment())
+    assert result.persisted is True
+    assert existing.read_bytes() == b"existing"
+    assert result.final_path and result.final_path.name == "safe-file-1.bin"
+
+
+def test_integrity_failure_size_mismatch_and_rename_failure_leave_no_final_or_temp(tmp_path, monkeypatch) -> None:
+    body = b"%PDF-1.7\n%%EOF\n"
+    assert cdp_workflow.validate_integrity(tmp_path / "missing.pdf", body, "PDF") == "FAIL"
+
+    monkeypatch.setattr(cdp_workflow, "validate_integrity", lambda *_args: "FAIL")
+    failed = cdp_workflow.download_one(_Page(_Response(200, body)), tmp_path, _attachment())
+    assert failed.failure_code == "INTEGRITY_CHECK_FAILED"
+    assert failed.persisted is False
+    assert list(tmp_path.iterdir()) == []
+
+    monkeypatch.setattr(cdp_workflow, "validate_integrity", lambda *_args: "PASS")
+    monkeypatch.setattr(cdp_workflow.os, "replace", lambda *_args: (_ for _ in ()).throw(OSError("rename failed")))
+    rename_failed = cdp_workflow.download_one(_Page(_Response(200, body)), tmp_path, _attachment())
+    assert rename_failed.failure_code == "ATOMIC_PERSISTENCE_FAILED"
+    assert rename_failed.persisted is False
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_runner_exposes_explicit_source_level_smoke_flag() -> None:
