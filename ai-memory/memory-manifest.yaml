@@ -1,0 +1,49 @@
+memory_version: "1.0"
+project: SmartOfficeAI360-Canonical
+language: en
+required_read_order:
+  - 01-project/PURPOSE.md
+  - 01-project/PROJECT_OVERVIEW.md
+  - 02-domain/QLVB_BUSINESS_WORKFLOW.md
+  - 02-domain/QLVB_DOMAIN.md
+  - 03-architecture/SYSTEM_ARCHITECTURE.md
+  - 03-architecture/CDP_ARCHITECTURE.md
+  - 03-architecture/NEOREMOTING_CONTRACT.md
+  - 03-architecture/DOWNLOAD_PIPELINE.md
+  - 03-architecture/ARCHITECTURE.md
+  - 04-engineering/FORBIDDEN_ACTIONS.md
+  - 04-engineering/TEST_STRATEGY.md
+  - 04-engineering/SECURITY_RULES.md
+  - 04-engineering/ENGINEERING_RULES.md
+  - 05-operations/RUNBOOK_CDP.md
+  - 05-operations/TROUBLESHOOTING.md
+  - 05-operations/OPERATIONS.md
+  - 06-decisions/ADR-001-USE-EXTERNAL-EDGE-CDP.md
+  - 06-decisions/ADR-002-USE-NEOREMOTING-CALLBACK.md
+  - 06-decisions/ADR-003-USE-AUTHENTICATED-DIRECT-DOWNLOAD.md
+  - 06-decisions/ADR-004-DO-NOT-CLOSE-EXTERNALLY-OWNED-BROWSER.md
+  - 07-current/CURRENT_STATE.md
+  - 08-handoffs/LATEST_HANDOFF.md
+  - 08-handoffs/HANDOFF_TEMPLATE.md
+last_verified_commit: ea39c35a27b399fe5c049b3d4545db2322142ac9
+protected_invariants:
+  - external_authenticated_edge_cdp
+  - no_browser_close_from_cdp_workflow
+  - exact_menu_matching_and_mojibake_guard
+  - bounded_navigation_polling
+  - structural_visible_table_validation
+  - row_scoped_document_identifier
+  - legacy_neoremoting_getrset_call
+  - safe_parser_without_dynamic_evaluation
+  - authenticated_download_with_integrity_checks
+forbidden_actions:
+  - expose_sensitive_data
+  - reset_stash_or_clean_worktree
+  - claim_full_suite_success_without_evidence
+  - live_run_without_authorization
+  - push_or_deploy_without_authorization
+validation_commands:
+  - python -m py_compile scripts/validate_ai_memory.py
+  - python scripts/validate_ai_memory.py
+  - python -m pytest tests/test_ai_memory.py -q
+  - git diff --check
