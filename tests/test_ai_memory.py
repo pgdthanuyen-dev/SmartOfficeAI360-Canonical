@@ -29,3 +29,10 @@ def test_security_scan_ignores_guidance_but_rejects_secret_assignments():
 def test_latest_handoff_and_adr_set_are_present():
     assert (ROOT / "ai-memory/08-handoffs/LATEST_HANDOFF.md").is_file()
     assert len(list((ROOT / "ai-memory/06-decisions").glob("ADR-*.md"))) == 4
+
+
+def test_coverage_memory_is_deep_reference_not_onboarding_requirement():
+    manifest = (ROOT / "ai-memory/memory-manifest.yaml").read_text(encoding="utf-8")
+    assert "09-coverage/MEMORY_COVERAGE_MATRIX.md" in manifest
+    required_order = manifest.split("deep_reference:", 1)[0]
+    assert "09-coverage/" not in required_order

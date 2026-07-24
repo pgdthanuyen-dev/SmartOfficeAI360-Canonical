@@ -31,6 +31,10 @@ required_read_order:
   - 07-current/CURRENT_STATE.md
   - 08-handoffs/LATEST_HANDOFF.md
   - 08-handoffs/HANDOFF_TEMPLATE.md
+deep_reference:
+  - 09-coverage/MEMORY_COVERAGE_MATRIX.md
+  - 09-coverage/SUBSYSTEM_CATALOG.md
+  - 09-coverage/MEMORY_EXPANSION_ROADMAP.md
 last_verified_commit: ea39c35a27b399fe5c049b3d4545db2322142ac9
 last_verified_application_commit: 768dcebc07eddf5c704e395b7eaad8426b286c91
 verification:

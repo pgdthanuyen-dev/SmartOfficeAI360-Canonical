@@ -52,6 +52,9 @@ REQUIRED = [
     "ai-memory/07-current/CURRENT_STATE.md",
     "ai-memory/08-handoffs/HANDOFF_TEMPLATE.md",
     "ai-memory/08-handoffs/LATEST_HANDOFF.md",
+    "ai-memory/09-coverage/MEMORY_COVERAGE_MATRIX.md",
+    "ai-memory/09-coverage/SUBSYSTEM_CATALOG.md",
+    "ai-memory/09-coverage/MEMORY_EXPANSION_ROADMAP.md",
     "scripts/validate_ai_memory.py",
     "tests/test_ai_memory.py",
 ]
@@ -67,6 +70,7 @@ MANIFEST_KEYS = {
     "project",
     "language",
     "required_read_order",
+    "deep_reference",
     "last_verified_commit",
     "last_verified_application_commit",
     "verification",
@@ -136,6 +140,9 @@ def validate(root: Path = ROOT) -> list[str]:
             for key in ("main_commit", "originating_live_verified_commit"):
                 if not HASH_RE.fullmatch(str(verification.get(key, ""))):
                     errors.append(f"manifest verification {key} is not a 40-character hash")
+        deep_reference = manifest.get("deep_reference")
+        if not isinstance(deep_reference, list) or not all(isinstance(item, str) for item in deep_reference):
+            errors.append("manifest deep_reference must be a list of relative paths")
 
     memory_files = [path for path in required if path.suffix.lower() in {".md", ".yaml"}]
     for path in memory_files:
@@ -168,6 +175,9 @@ def validate(root: Path = ROOT) -> list[str]:
         for item in manifest.get("required_read_order", []):
             if not (root / "ai-memory" / str(item)).is_file():
                 errors.append(f"manifest read-order target missing: {item}")
+        for item in manifest.get("deep_reference", []):
+            if not (root / "ai-memory" / str(item)).is_file():
+                errors.append(f"manifest deep-reference target missing: {item}")
         if any(re.match(r"^(?:[A-Za-z]:[\\/]|\\\\)", str(value)) for value in manifest.values()):
             errors.append("absolute machine path found in manifest")
 

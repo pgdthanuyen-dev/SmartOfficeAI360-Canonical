@@ -13,6 +13,14 @@ This directory is the vendor-neutral source of truth for project context. Keep e
 7. `07-current/CURRENT_STATE.md`
 8. `08-handoffs/LATEST_HANDOFF.md`, then `08-handoffs/HANDOFF_TEMPLATE.md`
 
+## Deep reference
+
+For planning, documentation, or subsystem-boundary work, read the coverage set after the current-state entry. It is deliberately outside the required onboarding order.
+
+- `09-coverage/MEMORY_COVERAGE_MATRIX.md`
+- `09-coverage/SUBSYSTEM_CATALOG.md`
+- `09-coverage/MEMORY_EXPANSION_ROADMAP.md`
+
 ## Memory rules
 
 - Update `CURRENT_STATE.md` whenever verified state changes.
