@@ -60,8 +60,8 @@ Evidence labels: `CODE_FACT` names repository modules inspected for R51. `TEST_V
 - Data flow: validated document/attachment → domain rows → later extraction, proposal, review, and sync boundaries.
 - Dependencies: SQLite and existing document/index compatibility.
 - Primary test: `tests/test_g02_domain_schema.py`.
-- Current state: **CODE_FACT** and **TEST_VERIFIED**; no runtime migration or business-data live claim.
-- Related memory: roadmap target; detailed repository design is `docs/architecture/G02_DOMAIN_SCHEMA.md`.
+- Current state: **CODE_FACT** and **TEST_VERIFIED**; source-anchored domain/lifecycle and migration compatibility memory completed in R52. No runtime migration or business-data live claim.
+- Related memory: `DOMAIN_SCHEMA_AND_LIFECYCLE.md`, `SCHEMA_MIGRATION_AND_COMPATIBILITY.md`, and the repository design in `docs/architecture/G02_DOMAIN_SCHEMA.md`.
 
 ### G03 extraction and OCR — PARTIAL
 
@@ -239,8 +239,8 @@ Evidence labels: `CODE_FACT` names repository modules inspected for R51. `TEST_V
 - Data flow: untrusted values → allowlist/bounds/redaction → safe record, error, or rejection.
 - Dependencies: standard-library parsing/regular expressions and per-boundary models.
 - Primary test: redaction/safety cases in QLVB, G04, and G05 test families.
-- Current state: existing focused controls; no whole-system classification or incident playbook.
-- Related memory: `SECURITY_RULES.md`, ADRs, P0 roadmap.
+- Current state: source-anchored trust/data-boundary memory completed in R52; cross-system retention and incident procedures remain gaps.
+- Related memory: `SECURITY_RULES.md`, `TRUST_BOUNDARIES_AND_DATA_HANDLING.md`, ADRs, P0 roadmap.
 
 ### Test and release operations — MINIMAL
 

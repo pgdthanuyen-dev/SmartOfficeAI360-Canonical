@@ -36,3 +36,14 @@ def test_coverage_memory_is_deep_reference_not_onboarding_requirement():
     assert "09-coverage/MEMORY_COVERAGE_MATRIX.md" in manifest
     required_order = manifest.split("deep_reference:", 1)[0]
     assert "09-coverage/" not in required_order
+
+
+def test_g02_and_trust_memory_is_registered_and_source_anchored():
+    manifest = (ROOT / "ai-memory/memory-manifest.yaml").read_text(encoding="utf-8")
+    for path in (
+        "02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md",
+        "03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
+        "04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md",
+    ):
+        assert path in manifest
+        assert "LIVE_VERIFIED" not in (ROOT / "ai-memory" / path).read_text(encoding="utf-8")

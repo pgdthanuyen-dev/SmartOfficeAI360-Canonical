@@ -16,6 +16,8 @@ SENSITIVE_RE = re.compile(
     re.IGNORECASE,
 )
 LINK_RE = re.compile(r"\]\(([^)#]+(?:#[^)]+)?)\)")
+ABSOLUTE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)")
+VALID_COVERAGE_STATUSES = {"COMPLETE", "SUBSTANTIAL", "PARTIAL", "MINIMAL", "NOT_DOCUMENTED", "PLANNED_ONLY", "NOT_APPLICABLE"}
 
 
 REQUIRED = [
@@ -27,6 +29,7 @@ REQUIRED = [
     "ai-memory/01-project/PURPOSE.md",
     "ai-memory/02-domain/QLVB_DOMAIN.md",
     "ai-memory/02-domain/QLVB_BUSINESS_WORKFLOW.md",
+    "ai-memory/02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md",
     "ai-memory/03-architecture/ARCHITECTURE.md",
     "ai-memory/03-architecture/SYSTEM_ARCHITECTURE.md",
     "ai-memory/03-architecture/MODULE_MAP.md",
@@ -36,11 +39,13 @@ REQUIRED = [
     "ai-memory/03-architecture/CDP_ARCHITECTURE.md",
     "ai-memory/03-architecture/NEOREMOTING_CONTRACT.md",
     "ai-memory/03-architecture/DOWNLOAD_PIPELINE.md",
+    "ai-memory/03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
     "ai-memory/04-engineering/ENGINEERING_RULES.md",
     "ai-memory/04-engineering/FORBIDDEN_ACTIONS.md",
     "ai-memory/04-engineering/TEST_STRATEGY.md",
     "ai-memory/04-engineering/TEST_COVERAGE_MAP.md",
     "ai-memory/04-engineering/SECURITY_RULES.md",
+    "ai-memory/04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md",
     "ai-memory/05-operations/OPERATIONS.md",
     "ai-memory/05-operations/RUNBOOK_CDP.md",
     "ai-memory/05-operations/COMMAND_REFERENCE.md",
@@ -151,6 +156,8 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append(f"memory file exceeds 500 lines: {path.relative_to(root)}")
         if sensitive_findings(text):
             errors.append(f"sensitive assignment-like material found: {path.relative_to(root)}")
+        if ABSOLUTE_PATH_RE.search(text):
+            errors.append(f"absolute machine path found in memory: {path.relative_to(root)}")
         for target in LINK_RE.findall(text):
             target_path = target.split("#", 1)[0]
             if "://" in target_path or target_path.startswith("mailto:"):
@@ -180,6 +187,19 @@ def validate(root: Path = ROOT) -> list[str]:
                 errors.append(f"manifest deep-reference target missing: {item}")
         if any(re.match(r"^(?:[A-Za-z]:[\\/]|\\\\)", str(value)) for value in manifest.values()):
             errors.append("absolute machine path found in manifest")
+
+    matrix = (root / "ai-memory/09-coverage/MEMORY_COVERAGE_MATRIX.md").read_text(encoding="utf-8")
+    for line in matrix.splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) == 16 and parts[1] not in {"Subsystem", "---"} and parts[11] not in VALID_COVERAGE_STATUSES:
+            errors.append(f"invalid coverage overall status: {parts[11]}")
+    for relative in (
+        "ai-memory/02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md",
+        "ai-memory/03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
+        "ai-memory/04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md",
+    ):
+        if "LIVE_VERIFIED" in (root / relative).read_text(encoding="utf-8"):
+            errors.append(f"unsupported live-verified claim in source-anchored memory: {relative}")
 
     adr_dir = root / "ai-memory/06-decisions"
     titles: set[str] = set()

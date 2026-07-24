@@ -11,11 +11,11 @@ This roadmap prioritizes documentation work only. A wave must be sourced from co
 - Acceptance criterion: every claim names an evidence label; no live, migration, or full-suite claim is added without separate evidence.
 - Risk if absent: incorrect lifecycle/state assumptions can cause unsafe migrations, handling, or evidence overclaims.
 
-1. **G02 domain schema.** Create entity/state-transition, additive-migration, dedupe, review, and sync-event memory from `domain_*` modules and `test_g02_domain_schema.py`.
-2. **QLVB change control.** Keep the existing CDP, NeoRemoting, and download documents as the only live-verified scope; add a concise operator error mapping only if it can cite source/tests.
-3. **Memory evidence convention.** Retain `CODE_FACT`, `TEST_VERIFIED`, `LIVE_VERIFIED`, `BUSINESS_CONFIRMED`, `HISTORICAL`, and `PLANNED` labels in new deep-reference documents.
+1. **G02 domain schema — completed in R52.** Source/test anchored domain, migration, and compatibility documents now cover the in-repository contract; this is not production migration evidence.
+2. **Storage/queue lifecycle and data retention.** Document manifest ownership, queue validation, recovery limits, and retention classification from source/tests before expanding processing boundaries.
+3. **QLVB change control.** Keep the existing CDP, NeoRemoting, and download documents as the only live-verified scope; add a concise operator error mapping only if it can cite source/tests.
 
-Exit evidence: validator passes; no claim that G02 migrations have been run against live data; no expanded live claim.
+Exit evidence: validator passes; no claim that G02 migrations have been run against live data; storage/queue retention remains the next P0 evidence task.
 
 ## P1 — document content and persistence boundaries
 

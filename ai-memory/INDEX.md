@@ -20,6 +20,9 @@ For planning, documentation, or subsystem-boundary work, read the coverage set a
 - `09-coverage/MEMORY_COVERAGE_MATRIX.md`
 - `09-coverage/SUBSYSTEM_CATALOG.md`
 - `09-coverage/MEMORY_EXPANSION_ROADMAP.md`
+- `02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md`
+- `03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md`
+- `04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md`
 
 ## Memory rules
 

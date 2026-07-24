@@ -35,6 +35,9 @@ deep_reference:
   - 09-coverage/MEMORY_COVERAGE_MATRIX.md
   - 09-coverage/SUBSYSTEM_CATALOG.md
   - 09-coverage/MEMORY_EXPANSION_ROADMAP.md
+  - 02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md
+  - 03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md
+  - 04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md
 last_verified_commit: ea39c35a27b399fe5c049b3d4545db2322142ac9
 last_verified_application_commit: 768dcebc07eddf5c704e395b7eaad8426b286c91
 verification:
