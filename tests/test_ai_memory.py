@@ -73,3 +73,12 @@ def test_g04_proposal_memory_is_registered_and_not_overclaimed():
     assert "03-architecture/G04_AI_PROPOSAL_BOUNDARY.md" in (
         ROOT / "ai-memory/memory-manifest.yaml"
     ).read_text(encoding="utf-8")
+
+
+def test_g05_policy_and_contract_memory_are_registered():
+    for path in (
+        "02-domain/G05_TASK_CARDINALITY_AND_ASSIGNMENT_GOVERNANCE.md",
+        "03-architecture/G05_ASSIGNMENT_INTEGRATION_CONTRACT.md",
+    ):
+        text = (ROOT / "ai-memory" / path).read_text(encoding="utf-8")
+        assert "APPROVED_BUSINESS_POLICY" in text or "PLANNED_CONTRACT" in text

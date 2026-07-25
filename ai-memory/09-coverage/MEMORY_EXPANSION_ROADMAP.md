@@ -38,7 +38,7 @@ Exit evidence: exact module/test references, no extracted text or real document 
 - Risk if absent: AI or deterministic recommendations could be misrepresented as approvals or assignments.
 
 1. **G04 AI proposal.** Source-anchored boundary documentation now records strict validation, citation verification, deduplication, idempotency conflict handling, per-proposal transaction scope, fake-provider-only status, and intentional partial batches. Remaining work requires approved provider, prompt-safety, redaction/retention, review, and operational scope; no live acceptance is inferred.
-2. **G05A assignment rules.** Record deterministic rule input/output, scoring/conflict policy, append-only history, and no-person/no-external-call boundary.
+2. **G05A assignment rules.** Approved cardinality/governance and a planned integration contract are documented. Next implementation scope must enforce document-level aggregation, tenant/provenance, manual review, and one active draft without claiming live approval.
 3. **G05B personnel selection.** Record tenant/effective-date/availability filtering, substitution limits, privacy constraints, and proposal-only result.
 4. **G05C assignment drafts.** Record immutable snapshots, review state, bounded handoff attempts, and the difference between a draft receiver and an official task.
 

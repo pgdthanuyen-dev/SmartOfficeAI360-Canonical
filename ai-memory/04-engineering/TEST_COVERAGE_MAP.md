@@ -31,4 +31,6 @@ G03 focused extraction/OCR tests: **TEST_VERIFIED** `33 passed` on 2026-07-25. T
 
 G04 focused proposal-boundary tests: **TEST_VERIFIED** `42 passed` on 2026-07-25. The suite uses a fake provider; it is not production-provider or live-AI evidence.
 
+G05 component tests cover rule matching, personnel selection, and draft construction; **KNOWN_GAP**: no focused end-to-end test yet enforces the approved document-level cardinality contract.
+
 Focused QLVB/CDP/NeoRemoting tests recorded after R49: **HISTORICAL** `156 passed`. This does not establish complete repository coverage.

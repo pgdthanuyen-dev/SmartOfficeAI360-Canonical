@@ -21,6 +21,8 @@ For planning, documentation, or subsystem-boundary work, read the coverage set a
 - `09-coverage/SUBSYSTEM_CATALOG.md`
 - `09-coverage/MEMORY_EXPANSION_ROADMAP.md`
 - `02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md`
+- `02-domain/G05_TASK_CARDINALITY_AND_ASSIGNMENT_GOVERNANCE.md`
+- `03-architecture/G05_ASSIGNMENT_INTEGRATION_CONTRACT.md`
 - `03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md`
 - `04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md`
 - `03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md`
