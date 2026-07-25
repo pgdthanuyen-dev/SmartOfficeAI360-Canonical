@@ -42,6 +42,7 @@ REQUIRED = [
     "ai-memory/03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
     "ai-memory/03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md",
     "ai-memory/03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md",
+    "ai-memory/03-architecture/G04_AI_PROPOSAL_BOUNDARY.md",
     "ai-memory/04-engineering/ENGINEERING_RULES.md",
     "ai-memory/04-engineering/FORBIDDEN_ACTIONS.md",
     "ai-memory/04-engineering/TEST_STRATEGY.md",
@@ -199,6 +200,7 @@ def validate(root: Path = ROOT) -> list[str]:
         "ai-memory/02-domain/DOMAIN_SCHEMA_AND_LIFECYCLE.md",
         "ai-memory/03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md",
         "ai-memory/04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md",
+        "ai-memory/03-architecture/G04_AI_PROPOSAL_BOUNDARY.md",
     ):
         if re.search(r"(?<!NOT_)LIVE_VERIFIED", (root / relative).read_text(encoding="utf-8")):
             errors.append(f"unsupported live-verified claim in source-anchored memory: {relative}")

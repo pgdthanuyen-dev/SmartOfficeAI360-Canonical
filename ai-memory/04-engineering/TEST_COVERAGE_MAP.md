@@ -23,7 +23,12 @@ Each row is **TEST_VERIFIED** at the named test/pattern level. It documents focu
 | G03 format and page extraction | `tests/test_g03_extraction_ocr.py` | `test_pdf_direct_text_multi_page`; `test_docx_*`; `test_*image*`; `test_page_numbering_starts_at_one` | PDF/DOCX/image paths, normalization, and ordered pages use generated fixtures and fake OCR. |
 | G03 cache and forced extraction | `tests/test_g03_extraction_ocr.py` | `test_cache_hit_does_not_extract_again`; `test_force_extraction_bypasses_cache`; `test_successful_force_atomically_replaces_old_cache` | Cache identity, hit behavior, forced replacement, and atomic result/page refresh. |
 | G03 failure safety | `tests/test_g03_extraction_ocr.py` | `test_force_failure_*`; `test_transaction_rollback_when_page_insert_fails`; `test_failed_result_does_not_store_partial_pages` | Failed work records an attempt and does not persist a partial page cache. |
+| G04 JSON and citation boundary | `tests/test_g04_ai_proposal_boundary.py` | `test_unknown_field_rejected_in_strict_mode`; `test_citation_*`; `test_excerpt_*` | Strict envelope validation and document/page/excerpt checks. |
+| G04 dedupe and idempotency | `tests/test_g04_ai_proposal_boundary.py` | `test_exact_duplicate_*`; `test_idempotency_*`; `test_same_key_*` | Duplicate, replay, conflict, and simulated unique-constraint race outcomes. |
+| G04 transaction and bounds | `tests/test_g04_ai_proposal_boundary.py` | `test_citation_insert_failure_rolls_back_action_item`; `test_batch_partial_success`; `test_*warning*` | Per-proposal rollback, intentional partial batches, and bounded warnings/errors. |
 
 G03 focused extraction/OCR tests: **TEST_VERIFIED** `33 passed` on 2026-07-25. The suite uses a fake OCR adapter; it is not real-Tesseract or live acceptance evidence.
+
+G04 focused proposal-boundary tests: **TEST_VERIFIED** `42 passed` on 2026-07-25. The suite uses a fake provider; it is not production-provider or live-AI evidence.
 
 Focused QLVB/CDP/NeoRemoting tests recorded after R49: **HISTORICAL** `156 passed`. This does not establish complete repository coverage.

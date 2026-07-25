@@ -37,7 +37,7 @@ Exit evidence: exact module/test references, no extracted text or real document 
 - Acceptance criterion: proposal-only status, tenant boundaries, idempotency conflicts, and external-call limits are explicit.
 - Risk if absent: AI or deterministic recommendations could be misrepresented as approvals or assignments.
 
-1. **G04 AI proposal.** Record strict JSON validation, citation verification, fingerprint/deduplication, idempotency conflict handling, transaction scope, fake-provider-only status, and human-review boundary.
+1. **G04 AI proposal.** Source-anchored boundary documentation now records strict validation, citation verification, deduplication, idempotency conflict handling, per-proposal transaction scope, fake-provider-only status, and intentional partial batches. Remaining work requires approved provider, prompt-safety, redaction/retention, review, and operational scope; no live acceptance is inferred.
 2. **G05A assignment rules.** Record deterministic rule input/output, scoring/conflict policy, append-only history, and no-person/no-external-call boundary.
 3. **G05B personnel selection.** Record tenant/effective-date/availability filtering, substitution limits, privacy constraints, and proposal-only result.
 4. **G05C assignment drafts.** Record immutable snapshots, review state, bounded handoff attempts, and the difference between a draft receiver and an official task.

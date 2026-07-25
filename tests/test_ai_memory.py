@@ -62,3 +62,14 @@ def test_g03_extraction_memory_is_registered_and_not_overclaimed():
     assert "03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md" in (
         ROOT / "ai-memory/memory-manifest.yaml"
     ).read_text(encoding="utf-8")
+
+
+def test_g04_proposal_memory_is_registered_and_not_overclaimed():
+    path = ROOT / "ai-memory/03-architecture/G04_AI_PROPOSAL_BOUNDARY.md"
+    text = path.read_text(encoding="utf-8")
+    assert "NOT_LIVE_VERIFIED" in text
+    assert "42 passed" in text
+    assert "FakeAiProposalProvider" in text
+    assert "03-architecture/G04_AI_PROPOSAL_BOUNDARY.md" in (
+        ROOT / "ai-memory/memory-manifest.yaml"
+    ).read_text(encoding="utf-8")

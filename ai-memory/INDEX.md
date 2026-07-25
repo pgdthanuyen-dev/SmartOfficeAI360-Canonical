@@ -25,6 +25,7 @@ For planning, documentation, or subsystem-boundary work, read the coverage set a
 - `04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md`
 - `03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md`
 - `03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md`
+- `03-architecture/G04_AI_PROPOSAL_BOUNDARY.md`
 
 ## Memory rules
 

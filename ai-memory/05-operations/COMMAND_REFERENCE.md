@@ -21,6 +21,15 @@ python -m pytest tests/test_g03_extraction_ocr.py -q -p no:cacheprovider
 - **TEST_VERIFIED**: this is the focused G03 extraction/cache suite. It uses generated fixtures and a fake OCR adapter.
 - It is not a command to run live OCR and does not establish real-Tesseract or production acceptance.
 
+## G04 focused proposal-boundary checks
+
+```text
+python -m pytest tests/test_g04_ai_proposal_boundary.py -q -p no:cacheprovider
+```
+
+- **TEST_VERIFIED**: this is a local G04 contract suite using a fake provider.
+- It does not call AI and does not establish production-provider or live acceptance.
+
 ## CDP smoke entry
 
 ```text
