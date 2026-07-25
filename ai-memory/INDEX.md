@@ -24,6 +24,7 @@ For planning, documentation, or subsystem-boundary work, read the coverage set a
 - `03-architecture/SCHEMA_MIGRATION_AND_COMPATIBILITY.md`
 - `04-engineering/TRUST_BOUNDARIES_AND_DATA_HANDLING.md`
 - `03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md`
+- `03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md`
 
 ## Memory rules
 

@@ -51,3 +51,14 @@ def test_g02_and_trust_memory_is_registered_and_source_anchored():
 
 def test_storage_lifecycle_memory_is_registered():
     assert (ROOT / "ai-memory/03-architecture/STORAGE_QUEUE_MANIFEST_LIFECYCLE.md").is_file()
+
+
+def test_g03_extraction_memory_is_registered_and_not_overclaimed():
+    path = ROOT / "ai-memory/03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md"
+    text = path.read_text(encoding="utf-8")
+    assert "NOT_LIVE_VERIFIED" in text
+    assert "33 passed" in text
+    assert "FakeOcrAdapter" in text
+    assert "03-architecture/G03_EXTRACTION_OCR_CACHE_SAFETY.md" in (
+        ROOT / "ai-memory/memory-manifest.yaml"
+    ).read_text(encoding="utf-8")

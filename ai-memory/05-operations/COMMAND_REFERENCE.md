@@ -12,6 +12,15 @@ python -m pytest tests/test_ai_memory.py -q
 git diff --check
 ```
 
+## G03 focused extraction checks
+
+```text
+python -m pytest tests/test_g03_extraction_ocr.py -q -p no:cacheprovider
+```
+
+- **TEST_VERIFIED**: this is the focused G03 extraction/cache suite. It uses generated fixtures and a fake OCR adapter.
+- It is not a command to run live OCR and does not establish real-Tesseract or production acceptance.
+
 ## CDP smoke entry
 
 ```text

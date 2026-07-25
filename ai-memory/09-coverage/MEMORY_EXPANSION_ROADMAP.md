@@ -24,7 +24,7 @@ Exit evidence: validator passes; no claim that G02 migrations have been run agai
 - Acceptance criterion: cache replacement/rollback, optional OCR, and compatibility limits are separately documented with no real content.
 - Risk if absent: operators may treat stale cache, failed extraction, or legacy fallback as safe without evidence.
 
-1. **G03 extraction/OCR.** Document attachment eligibility, magic-byte format handling, cache key, attempt history, transaction/rollback behavior, optional Tesseract dependency, and no-AI boundary.
+1. **G03 extraction/OCR.** Source-anchored contract now documents attachment eligibility, magic-byte format handling, cache key, attempt history, transaction/rollback behavior, optional Tesseract dependency, and no-AI boundary. Remaining P1 work is an approved dependency/recovery/retention runbook and any separately authorized concurrency scope; no real-Tesseract or live acceptance is inferred.
 2. **Legacy parser/CDP boundary.** Map `parser.py` and `downloader.py` responsibilities to the bounded CDP path without presenting fallback behavior as live-proven.
 3. **Storage/queue/manifest lifecycle.** Document queue states, ready-marker behavior, index rebuild, audit/quarantine, repair proposal, and preservation limits from source/tests.
 

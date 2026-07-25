@@ -20,5 +20,10 @@ Each row is **TEST_VERIFIED** at the named test/pattern level. It documents focu
 | Runtime frame/callback | `tests/test_neoremoting_download.py` | `test_adapter_*`; `test_callback_*`; `test_about_blank_*` | Child-frame selection and callback classification. |
 | Default category behavior | `tests/test_neoremoting_download.py` | `test_controlled_workflow_*`; `test_category_order_skips_pending_*` | Bounded three-category behavior excluding pending by default. |
 | Redacted diagnostics | `tests/test_neoremoting_download.py` | `test_direct_transport_diagnostics_exclude_query_material`; `test_direct_category_navigation_does_not_log_session_query` | Query material is not logged. |
+| G03 format and page extraction | `tests/test_g03_extraction_ocr.py` | `test_pdf_direct_text_multi_page`; `test_docx_*`; `test_*image*`; `test_page_numbering_starts_at_one` | PDF/DOCX/image paths, normalization, and ordered pages use generated fixtures and fake OCR. |
+| G03 cache and forced extraction | `tests/test_g03_extraction_ocr.py` | `test_cache_hit_does_not_extract_again`; `test_force_extraction_bypasses_cache`; `test_successful_force_atomically_replaces_old_cache` | Cache identity, hit behavior, forced replacement, and atomic result/page refresh. |
+| G03 failure safety | `tests/test_g03_extraction_ocr.py` | `test_force_failure_*`; `test_transaction_rollback_when_page_insert_fails`; `test_failed_result_does_not_store_partial_pages` | Failed work records an attempt and does not persist a partial page cache. |
+
+G03 focused extraction/OCR tests: **TEST_VERIFIED** `33 passed` on 2026-07-25. The suite uses a fake OCR adapter; it is not real-Tesseract or live acceptance evidence.
 
 Focused QLVB/CDP/NeoRemoting tests recorded after R49: **HISTORICAL** `156 passed`. This does not establish complete repository coverage.
