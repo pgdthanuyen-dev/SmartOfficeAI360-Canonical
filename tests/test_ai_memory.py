@@ -17,7 +17,7 @@ def test_memory_validator_passes():
 def test_manifest_commit_is_stable():
     text = (ROOT / "ai-memory/memory-manifest.yaml").read_text(encoding="utf-8")
     assert "ea39c35a27b399fe5c049b3d4545db2322142ac9" in text
-    assert "768dcebc07eddf5c704e395b7eaad8426b286c91" in text
+    assert "76a3b9a91a6643feba5c205e6f96cc7571bc9348" in text
     assert "50fd0db8403026c65f06b94323b67e90164b31b4" in text
 
 
@@ -82,3 +82,12 @@ def test_g05_policy_and_contract_memory_are_registered():
     ):
         text = (ROOT / "ai-memory" / path).read_text(encoding="utf-8")
         assert "APPROVED_BUSINESS_POLICY" in text or "PLANNED_CONTRACT" in text
+
+
+def test_g06_contract_memory_is_registered_and_not_overclaimed():
+    path = ROOT / "ai-memory/03-architecture/G06_PLANNER_DRAFT_HANDOFF_CONTRACT.md"
+    text = path.read_text(encoding="utf-8")
+    assert "PLANNED_CONTRACT" in text and "KNOWN_GAP" in text
+    assert "03-architecture/G06_PLANNER_DRAFT_HANDOFF_CONTRACT.md" in (
+        ROOT / "ai-memory/memory-manifest.yaml"
+    ).read_text(encoding="utf-8")

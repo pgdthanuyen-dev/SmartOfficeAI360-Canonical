@@ -45,6 +45,7 @@ REQUIRED = [
     "ai-memory/03-architecture/G04_AI_PROPOSAL_BOUNDARY.md",
     "ai-memory/02-domain/G05_TASK_CARDINALITY_AND_ASSIGNMENT_GOVERNANCE.md",
     "ai-memory/03-architecture/G05_ASSIGNMENT_INTEGRATION_CONTRACT.md",
+    "ai-memory/03-architecture/G06_PLANNER_DRAFT_HANDOFF_CONTRACT.md",
     "ai-memory/04-engineering/ENGINEERING_RULES.md",
     "ai-memory/04-engineering/FORBIDDEN_ACTIONS.md",
     "ai-memory/04-engineering/TEST_STRATEGY.md",

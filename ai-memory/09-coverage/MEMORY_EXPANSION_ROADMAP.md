@@ -51,7 +51,7 @@ Exit evidence: no prompts, model credentials, real directory data, raw AI respon
 - Acceptance criterion: legacy upload and G05C handoff are never conflated; credentials remain external and full-suite state remains unclaimed.
 - Risk if absent: support staff may use the wrong retry, configuration, or UI path.
 
-1. **Planner KPI.** Separate the legacy queue upload client from the G05C draft handoff client. Document configuration source classes without values, manual retry/unknown outcome policy, and incident boundaries.
+1. **Planner KPI.** G06 now freezes a source-anchored v1 draft contract and separates legacy upload from G05C handoff. Next work must implement source-document cardinality, version semantics, credential-to-tenant binding, and focused compatibility tests without claiming remote acceptance.
 2. **GUI.** Create a screen/module map and operator journey based on `gui_tk.py` and narrow UI tests; label unsupported UI flows as unknown.
 3. **Doctor/diagnostics.** Document safe checks, masking/redaction expectations, report locations at a generic level, and what requires operator escalation.
 

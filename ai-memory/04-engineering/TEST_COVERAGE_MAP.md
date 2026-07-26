@@ -34,3 +34,5 @@ G04 focused proposal-boundary tests: **TEST_VERIFIED** `42 passed` on 2026-07-25
 G05 component tests cover rule matching, personnel selection, and draft construction; **KNOWN_GAP**: no focused end-to-end test yet enforces the approved document-level cardinality contract.
 
 Focused QLVB/CDP/NeoRemoting tests recorded after R49: **HISTORICAL** `156 passed`. This does not establish complete repository coverage.
+
+| Planner draft receiver | Planner `backend/scripts/testSmartOfficeDraftReceiver.ts` | receiver validation, tenant/key duplicate, transaction, and local HTTP route | **TEST_VERIFIED** fake-store/localhost script; not production integration evidence. |

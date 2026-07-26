@@ -43,8 +43,9 @@ deep_reference:
   - 03-architecture/G04_AI_PROPOSAL_BOUNDARY.md
   - 02-domain/G05_TASK_CARDINALITY_AND_ASSIGNMENT_GOVERNANCE.md
   - 03-architecture/G05_ASSIGNMENT_INTEGRATION_CONTRACT.md
+  - 03-architecture/G06_PLANNER_DRAFT_HANDOFF_CONTRACT.md
 last_verified_commit: ea39c35a27b399fe5c049b3d4545db2322142ac9
-last_verified_application_commit: 768dcebc07eddf5c704e395b7eaad8426b286c91
+last_verified_application_commit: 76a3b9a91a6643feba5c205e6f96cc7571bc9348
 verification:
   main_commit: 768dcebc07eddf5c704e395b7eaad8426b286c91
   originating_live_verified_commit: 50fd0db8403026c65f06b94323b67e90164b31b4
