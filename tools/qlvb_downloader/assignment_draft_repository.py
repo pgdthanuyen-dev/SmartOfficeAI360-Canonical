@@ -18,6 +18,7 @@ ASSIGNMENT_DRAFT_REVIEW_MIGRATION_VERSION = "g05c_assignment_draft_review_events
 ASSIGNMENT_DRAFT_HANDOFF_MIGRATION_VERSION = "g05c_assignment_draft_planner_handoff_1"
 ASSIGNMENT_DRAFT_SOURCE_METADATA_MIGRATION_VERSION = "g05c_assignment_draft_source_metadata_1"
 ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION = "g05c_assignment_draft_extended_source_payload_1"
+ASSIGNMENT_DRAFT_ACTIVE_CONSTRAINT_MIGRATION_VERSION = "g05c_assignment_draft_one_active_1"
 MIGRATION_RUNTIME_ENTRYPOINT = "LIBRARY_ONLY"
 
 _SHA256_CHECK = "length({field}) = 64 AND {field} NOT GLOB '*[^0-9a-f]*'"
@@ -67,6 +68,7 @@ _CREATE_TABLES_SQL = [
         planner_handoff_result TEXT CHECK(length(planner_handoff_result) <= 64),
         planner_handoff_correlation_id TEXT CHECK(length(planner_handoff_correlation_id) <= 100),
         planner_handoff_error TEXT CHECK(length(planner_handoff_error) <= 500),
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
         UNIQUE(tenant_id, source_system, source_document_id, draft_version),
         CHECK(supersedes_draft_id IS NULL OR supersedes_draft_id <> id),
         FOREIGN KEY(supersedes_draft_id) REFERENCES assignment_drafts(id) ON DELETE RESTRICT
@@ -125,6 +127,7 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_assignment_drafts_source_version ON assignment_drafts(tenant_id, source_system, source_document_id, draft_version DESC);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_drafts_source_input_fingerprint ON assignment_drafts(tenant_id, source_input_fingerprint);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_drafts_content_fingerprint ON assignment_drafts(tenant_id, draft_content_fingerprint);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_assignment_drafts_one_active ON assignment_drafts(tenant_id, source_document_id) WHERE is_active=1;",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_draft_order ON assignment_draft_personnel(draft_id, item_order);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_personnel_source_key ON assignment_draft_personnel(tenant_id, personnel_source_key);",
     "CREATE INDEX IF NOT EXISTS idx_assignment_draft_review_events_current ON assignment_draft_review_events(tenant_id, draft_id, created_at DESC, id DESC);",
@@ -142,6 +145,7 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
         conn.execute(sql)
     _upgrade_handoff_columns(conn)
     _upgrade_source_metadata_columns(conn)
+    _upgrade_active_draft_column(conn)
     for sql in _INDEXES_SQL:
         conn.execute(sql)
     conn.execute(
@@ -164,6 +168,7 @@ def init_assignment_draft_schema(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (ASSIGNMENT_DRAFT_EXTENDED_SOURCE_PAYLOAD_MIGRATION_VERSION, utc_now_iso()),
     )
+    conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)", (ASSIGNMENT_DRAFT_ACTIVE_CONSTRAINT_MIGRATION_VERSION, utc_now_iso()))
     conn.commit()
 
 
@@ -196,6 +201,11 @@ def _upgrade_source_metadata_columns(conn: sqlite3.Connection) -> None:
     for name, definition in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE assignment_drafts ADD COLUMN {name} {definition}")
+
+def _upgrade_active_draft_column(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(assignment_drafts)").fetchall()}
+    if "is_active" not in columns:
+        conn.execute("ALTER TABLE assignment_drafts ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
 
 
 ASSIGNMENT_DRAFT_SCHEMA_VERSION = "1.0.0"
@@ -309,6 +319,8 @@ class AssignmentDraftRepository:
                 self.connection.rollback()
                 return duplicate
             previous = self._latest_for_source(candidate)
+            if previous is not None:
+                self.connection.execute("UPDATE assignment_drafts SET is_active=0 WHERE id=?", (previous.id,))
             draft_id = new_id()
             draft_version = 1 if previous is None else previous.draft_version + 1
             self._insert_draft(candidate, draft_id, draft_version, previous.id if previous else None)
