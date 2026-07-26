@@ -306,6 +306,39 @@ class AiProposalRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_accepted_proposals_for_tenant_document(
+        self, *, tenant_id: str, document_id: str
+    ) -> list[dict[str, Any]]:
+        """Return accepted G04 records only when the document belongs to ``tenant_id``.
+
+        This is intentionally a read-only boundary for G05 orchestration.  It exposes
+        identifiers and persisted provenance references, never an AI request payload.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT i.id AS proposal_item_id, i.document_id, d.tenant_id,
+                   i.external_proposal_id, i.action_item_id,
+                   i.fingerprint, i.confidence, i.warnings,
+                   a.id AS action_id,
+                   a.title AS action_title, a.description AS action_description,
+                   a.proposed_unit_id, a.proposed_assignee_id, a.proposed_due_date,
+                   a.expected_output, a.priority,
+                   COUNT(c.id) AS citation_count,
+                   GROUP_CONCAT(c.id) AS citation_ids
+            FROM ai_proposal_items i
+            JOIN documents d ON d.doc_id = i.document_id
+            LEFT JOIN action_items a ON a.id = i.action_item_id
+            LEFT JOIN source_citations c ON c.action_item_id = a.id
+            WHERE i.document_id = ?
+              AND d.tenant_id = ?
+              AND i.persist_status = ?
+            GROUP BY i.id, a.id
+            ORDER BY i.created_at, i.id
+            """,
+            (document_id, tenant_id, ProposalPersistStatus.ACCEPTED.value),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_successful_page_texts(
         self,
         *,

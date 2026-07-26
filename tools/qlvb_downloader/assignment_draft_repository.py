@@ -309,14 +309,16 @@ class AssignmentDraftRepository:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys=ON;")
 
-    def save_draft_candidate(self, candidate: AssignmentDraftCandidate) -> StoredAssignmentDraft:
+    def save_draft_candidate(self, candidate: AssignmentDraftCandidate, *, manage_transaction: bool = True) -> StoredAssignmentDraft:
         if not isinstance(candidate, AssignmentDraftCandidate):
             raise TypeError("candidate must be an AssignmentDraftCandidate")
-        self.connection.execute("BEGIN IMMEDIATE")
+        if manage_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
         try:
             duplicate = self._find_duplicate(candidate)
             if duplicate is not None:
-                self.connection.rollback()
+                if manage_transaction:
+                    self.connection.rollback()
                 return duplicate
             previous = self._latest_for_source(candidate)
             if previous is not None:
@@ -326,14 +328,24 @@ class AssignmentDraftRepository:
             self._insert_draft(candidate, draft_id, draft_version, previous.id if previous else None)
             for personnel in candidate.proposed_personnel:
                 self._insert_personnel(draft_id, candidate.tenant_id, personnel)
-            self.connection.commit()
+            if manage_transaction:
+                self.connection.commit()
         except Exception:
-            self.connection.rollback()
+            if manage_transaction:
+                self.connection.rollback()
             raise
         stored = self.get_draft_by_id(candidate.tenant_id, draft_id)
         if stored is None:
             raise RuntimeError("Saved draft could not be read back.")
         return stored
+
+    def get_active_for_document(self, tenant_id: str, source_document_id: str) -> StoredAssignmentDraft | None:
+        row = self.connection.execute(
+            """SELECT * FROM assignment_drafts WHERE tenant_id=? AND source_document_id=?
+               AND is_active=1 ORDER BY created_at DESC, id DESC LIMIT 1""",
+            (tenant_id, source_document_id),
+        ).fetchone()
+        return self._to_stored(row) if row else None
 
     def get_draft_by_id(self, tenant_id: str, draft_id: str) -> StoredAssignmentDraft | None:
         row = self.connection.execute(
