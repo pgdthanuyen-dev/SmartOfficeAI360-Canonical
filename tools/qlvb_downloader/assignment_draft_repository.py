@@ -301,6 +301,10 @@ class PlannerHandoffPersistenceConflict(ValueError):
     pass
 
 
+class AssignmentDraftProjectionError(ValueError):
+    """A persisted draft cannot safely be used for a handoff projection."""
+
+
 class AssignmentDraftRepository:
     """Append-only storage and tenant-scoped reads for G05C-C."""
 
@@ -346,6 +350,31 @@ class AssignmentDraftRepository:
             (tenant_id, source_document_id),
         ).fetchone()
         return self._to_stored(row) if row else None
+
+    def get_draft_for_projection(self, tenant_id: str, source_document_id: str, source_draft_version: int) -> StoredAssignmentDraft | None:
+        """Read exactly one active draft version; never select an unconstrained latest row."""
+        if not tenant_id or not source_document_id or not isinstance(source_draft_version, int):
+            raise AssignmentDraftProjectionError("MALFORMED_PERSISTED_DATA")
+        rows = self.connection.execute(
+            """SELECT * FROM assignment_drafts WHERE tenant_id=? AND source_document_id=?
+               AND draft_version=? AND is_active=1 ORDER BY id ASC""",
+            (tenant_id, source_document_id, source_draft_version),
+        ).fetchall()
+        if len(rows) > 1:
+            raise AssignmentDraftProjectionError("IRRECONCILABLE_SOURCE_CONFLICT")
+        if not rows:
+            return None
+        try:
+            stored = self._to_stored(rows[0])
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise AssignmentDraftProjectionError("MALFORMED_PERSISTED_DATA") from exc
+        # ``supersedes_draft_id`` belongs to the replacement draft and points
+        # backwards to its historical predecessor.  The SQL ``is_active=1``
+        # predicate above is the authoritative guard that this draft has not
+        # itself been superseded.
+        if stored.draft_version != source_draft_version:
+            raise AssignmentDraftProjectionError("SOURCE_DRAFT_NOT_ACTIVE")
+        return stored
 
     def get_draft_by_id(self, tenant_id: str, draft_id: str) -> StoredAssignmentDraft | None:
         row = self.connection.execute(

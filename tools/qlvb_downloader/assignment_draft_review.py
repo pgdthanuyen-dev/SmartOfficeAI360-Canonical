@@ -55,6 +55,14 @@ class AssignmentDraftReviewService:
             latest = self.repository._latest_for_source(candidate)
             if latest is None:
                 raise AssignmentDraftReviewError("draft source is unavailable")
+            if latest.id != current.id:
+                raise AssignmentDraftReviewError("OFFICE_REVISION_STALE_BASE")
+            deactivated = self.connection.execute(
+                "UPDATE assignment_drafts SET is_active=0 WHERE id=? AND tenant_id=? AND is_active=1",
+                (current.id, tenant_id),
+            )
+            if deactivated.rowcount != 1:
+                raise AssignmentDraftReviewError("OFFICE_REVISION_STALE_BASE")
             new_id_value = new_id()
             self.repository._insert_draft(candidate, new_id_value, latest.draft_version + 1, current.id)
             for person in candidate.proposed_personnel:

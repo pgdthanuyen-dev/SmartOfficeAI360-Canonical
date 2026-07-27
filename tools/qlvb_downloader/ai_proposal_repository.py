@@ -339,6 +339,33 @@ class AiProposalRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_validated_proposals_for_document(self, tenant_id: str, source_document_id: str) -> list[dict[str, Any]]:
+        """Projection-safe deterministic G04 read, scoped through document ownership."""
+        if not tenant_id or not source_document_id:
+            raise ValueError("MALFORMED_PERSISTED_DATA")
+        proposals = self.list_accepted_proposals_for_tenant_document(
+            tenant_id=tenant_id, document_id=source_document_id
+        )
+        result: list[dict[str, Any]] = []
+        for proposal in proposals:
+            try:
+                warnings = json.loads(proposal["warnings"] or "[]")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("MALFORMED_PERSISTED_DATA") from exc
+            if not isinstance(warnings, list):
+                raise ValueError("MALFORMED_PERSISTED_DATA")
+            citations = self.conn.execute(
+                """SELECT id, attachment_id, page_start, page_end, excerpt_sha256, source_text_sha256
+                   FROM source_citations WHERE action_item_id=? AND document_id=?
+                   ORDER BY attachment_id ASC, page_start ASC, page_end ASC, excerpt_sha256 ASC, id ASC""",
+                (proposal["action_id"], source_document_id),
+            ).fetchall() if proposal.get("action_id") else []
+            item = dict(proposal)
+            item["warnings"] = tuple(str(value) for value in warnings)
+            item["citations"] = tuple(dict(row) for row in citations)
+            result.append(item)
+        return sorted(result, key=lambda item: (str(item.get("external_proposal_id") or ""), str(item["proposal_item_id"])))
+
     def get_successful_page_texts(
         self,
         *,
