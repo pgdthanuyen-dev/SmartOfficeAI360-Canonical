@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from typing import Mapping
 
 CONTRACT_VERSION = "v1"
@@ -46,3 +47,19 @@ class PlannerDraftHandoffProjectionV1:
     generator_version: str
     warning_codes: tuple[str, ...]
     is_complete_for_transport: bool
+
+
+@dataclass(frozen=True)
+class PlannerDraftHandoffEnvelopeV1:
+    envelope_id: str
+    contract_version: str
+    source_system: str
+    tenant_id: str
+    tenant_key: str
+    source_document_id: str
+    source_draft_id: str
+    source_draft_version: int
+    canonical_payload_json: str
+    payload_sha256: str
+    created_at: str
+    projection: PlannerDraftHandoffProjectionV1 | None = None
