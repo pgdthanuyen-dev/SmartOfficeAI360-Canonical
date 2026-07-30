@@ -15,6 +15,9 @@ FINGERPRINT_MISMATCH_ERROR_CODE = "HANDOFF_ENVELOPE_FINGERPRINT_MISMATCH"
 IDENTITY_MISMATCH_ERROR_CODE = "HANDOFF_ENVELOPE_IDENTITY_MISMATCH"
 UNSUPPORTED_CONTRACT_ERROR_CODE = "HANDOFF_ENVELOPE_UNSUPPORTED_CONTRACT"
 UNSUPPORTED_SOURCE_SYSTEM_ERROR_CODE = "HANDOFF_ENVELOPE_UNSUPPORTED_SOURCE_SYSTEM"
+TRANSACTION_STATE_ERROR_CODE = "HANDOFF_ENVELOPE_TRANSACTION_STATE_ERROR"
+STORAGE_ERROR_CODE = "HANDOFF_ENVELOPE_STORAGE_ERROR"
+DATABASE_BUSY_ERROR_CODE = "HANDOFF_ENVELOPE_DATABASE_BUSY"
 
 
 class HandoffEnvelopeIntegrityError(ValueError):
@@ -39,17 +42,71 @@ class PlannerDraftHandoffEnvelopeRepository:
 
     def create_or_get_from_projection(self, projection: PlannerDraftHandoffProjectionV1) -> tuple[PlannerDraftHandoffEnvelopeV1, bool]:
         envelope = build_planner_draft_handoff_envelope_v1(projection)
-        existing = self.get_by_logical_key(projection.tenant_id, projection.source_document_id, projection.source_draft_version)
-        if existing:
-            if existing.payload_sha256 != envelope.payload_sha256:
-                raise HandoffEnvelopeIntegrityError(CONFLICT_ERROR_CODE)
-            return existing, False
-        self.conn.execute("INSERT INTO planner_draft_handoff_envelopes_v1 VALUES (?,?,?,?,?,?,?,?,?,?,?)", (
-            envelope.envelope_id, envelope.tenant_id, envelope.tenant_key, envelope.source_document_id,
-            envelope.source_draft_id, envelope.source_draft_version, envelope.contract_version, envelope.source_system,
-            envelope.canonical_payload_json, envelope.payload_sha256, envelope.created_at))
-        self.conn.commit()
-        return envelope, True
+        if self.conn.in_transaction:
+            raise HandoffEnvelopeIntegrityError(TRANSACTION_STATE_ERROR_CODE)
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            existing = self._find_exact(envelope)
+            if existing is not None:
+                self.conn.rollback()
+                return self._classify_existing(existing, envelope)
+            try:
+                self.conn.execute("INSERT INTO planner_draft_handoff_envelopes_v1 VALUES (?,?,?,?,?,?,?,?,?,?,?)", (
+                    envelope.envelope_id, envelope.tenant_id, envelope.tenant_key, envelope.source_document_id,
+                    envelope.source_draft_id, envelope.source_draft_version, envelope.contract_version, envelope.source_system,
+                    envelope.canonical_payload_json, envelope.payload_sha256, envelope.created_at))
+            except sqlite3.IntegrityError:
+                self._rollback_if_needed()
+                return self._classify_unique_race(envelope)
+            self.conn.commit()
+            return envelope, True
+        except HandoffEnvelopeIntegrityError:
+            self._rollback_if_needed()
+            raise
+        except sqlite3.OperationalError as exc:
+            self._rollback_if_needed()
+            raise HandoffEnvelopeIntegrityError(
+                DATABASE_BUSY_ERROR_CODE if self._is_busy(exc) else STORAGE_ERROR_CODE
+            ) from None
+        except sqlite3.Error:
+            self._rollback_if_needed()
+            raise HandoffEnvelopeIntegrityError(STORAGE_ERROR_CODE) from None
+        except Exception:
+            self._rollback_if_needed()
+            raise
+
+    def _find_exact(self, envelope: PlannerDraftHandoffEnvelopeV1):
+        row = self.conn.execute(
+            "SELECT * FROM planner_draft_handoff_envelopes_v1 WHERE tenant_id=? AND source_document_id=? AND source_draft_version=?",
+            (envelope.tenant_id, envelope.source_document_id, envelope.source_draft_version),
+        ).fetchone()
+        return self._read(row)
+
+    @staticmethod
+    def _classify_existing(existing: PlannerDraftHandoffEnvelopeV1, envelope: PlannerDraftHandoffEnvelopeV1):
+        if existing.payload_sha256 != envelope.payload_sha256:
+            raise HandoffEnvelopeIntegrityError(CONFLICT_ERROR_CODE)
+        return existing, False
+
+    def _classify_unique_race(self, envelope: PlannerDraftHandoffEnvelopeV1):
+        existing = self._find_exact(envelope)
+        if existing is None:
+            raise HandoffEnvelopeIntegrityError(STORAGE_ERROR_CODE)
+        return self._classify_existing(existing, envelope)
+
+    def _rollback_if_needed(self) -> None:
+        if self.conn.in_transaction:
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
+
+    @staticmethod
+    def _is_busy(exc: sqlite3.OperationalError) -> bool:
+        code = getattr(exc, "sqlite_errorcode", None)
+        return code in {getattr(sqlite3, "SQLITE_BUSY", None), getattr(sqlite3, "SQLITE_LOCKED", None)} or any(
+            marker in str(exc).casefold() for marker in ("database is locked", "database table is locked", "database is busy")
+        )
 
     def _read(self, row):
         if row is None: return None
